@@ -1,4 +1,10 @@
-# Nuxt Example
+# Reare disease info platform
+
+## Architecture
+<img width="3070" height="1684" alt="9feb721f10f574a266f01d47deebff23" src="https://github.com/user-attachments/assets/a09e8149-36ed-4f0a-9ce1-dfe9424f4614" />
+
+
+## Nuxt Stack
 
 Deploy your [Nuxt](https://nuxt.com) project to Vercel with zero configuration.
 
