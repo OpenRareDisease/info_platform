@@ -1,6 +1,6 @@
 import { serverSupabaseClient } from '#supabase/server'
 
-export default defineEventHandler(async (event) => {
+export default defineEventHandler(async event => {
   // Get Supabase client from Nuxt module
   const supabase = await serverSupabaseClient(event)
 
@@ -11,7 +11,7 @@ export default defineEventHandler(async (event) => {
   if (!message || typeof message !== 'string') {
     throw createError({
       statusCode: 400,
-      statusMessage: 'Message is required and must be a string'
+      statusMessage: 'Message is required and must be a string',
     })
   }
 
@@ -19,7 +19,7 @@ export default defineEventHandler(async (event) => {
   const { data, error } = await supabase
     .from('notes')
     .insert({
-      title: message
+      title: message,
     } as any)
     .select()
 
@@ -28,12 +28,12 @@ export default defineEventHandler(async (event) => {
     throw createError({
       statusCode: 500,
       statusMessage: 'Failed to create note in Supabase',
-      data: error
+      data: error,
     })
   }
 
   return {
     success: true,
-    note: data?.[0] || data
+    note: data?.[0] || data,
   }
 })
