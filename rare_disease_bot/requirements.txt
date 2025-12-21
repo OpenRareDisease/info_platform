@@ -1,0 +1,20 @@
+# LangChain 相关
+langchain>=0.1.0
+langchain-openai>=0.0.5
+
+# Playwright 浏览器自动化
+playwright>=1.40.0
+playwright-stealth>=1.0.0
+
+# 终端输出美化
+rich>=13.0.0
+
+# HTML 解析
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# 环境变量管理
+python-dotenv>=1.0.0
+
+# OpenAI API (如果使用 OpenAI 模型)
+openai>=1.0.0
