@@ -30,24 +30,24 @@ const mdContent = computed(() => md.render(note.value?.content ?? ''))
   </div>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .note-detail {
   padding: 24px;
-}
 
-.back-btn {
-  display: inline-block;
-  margin-bottom: 16px;
-  color: #555;
-  text-decoration: none;
-  font-size: 20px;
-}
+  .back-btn {
+    display: inline-block;
+    margin-bottom: 16px;
+    color: #555;
+    text-decoration: none;
+    font-size: 20px;
 
-.back-btn:hover {
-  text-decoration: underline;
-}
+    &:hover {
+      text-decoration: underline;
+    }
+  }
 
-.content {
-  line-height: 1.7;
+  .content {
+    line-height: 1.7;
+  }
 }
 </style>
