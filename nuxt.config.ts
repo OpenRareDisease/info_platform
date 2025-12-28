@@ -9,5 +9,9 @@ export default defineNuxtConfig({
 
   modules: ['@nuxtjs/supabase'],
 
+  supabase: {
+    redirect: false,
+  },
+
   compatibilityDate: '2025-11-30',
 })
