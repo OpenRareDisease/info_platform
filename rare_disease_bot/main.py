@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from rich.console import Console
 from core.agent import run_crawler_sync
+from utils.exporter import export_articles_to_server
 
 console = Console()
 
@@ -65,7 +66,15 @@ def main():
             max_articles=args.max_articles
         )
         
-        console.print("\n完成\n")
+        # 导出到 server/articles/<timestamp>
+        console.print("\n导出文章到 server 目录...")
+        dest = export_articles_to_server()
+        if dest:
+            console.print(f"导出完成: {dest}\n")
+        else:
+            console.print("没有新的 Markdown 文件，跳过导出\n")
+        
+        console.print("完成\n")
         
     except KeyboardInterrupt:
         console.print("\n\n中断")
