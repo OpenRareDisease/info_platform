@@ -253,6 +253,27 @@ jobs:
             try {
               console.log('Creating PR from fork: ' + forkOwner + ':main to OpenRareDisease/info_platform:main');
               
+              // 先检查 PAT 是否有权限访问上游仓库
+              try {
+                const { data: upstreamRepo } = await github.rest.repos.get({
+                  owner: 'OpenRareDisease',
+                  repo: 'info_platform',
+                });
+                console.log('✅ Can access upstream repository: ' + upstreamRepo.full_name);
+                console.log('   Repository is ' + (upstreamRepo.private ? 'private' : 'public'));
+              } catch (accessError) {
+                if (accessError.status === 404) {
+                  core.setFailed('❌ Upstream repository not found. Please check the repository name: OpenRareDisease/info_platform');
+                  return;
+                } else if (accessError.status === 403) {
+                  core.setFailed('❌ Permission denied accessing upstream repository. Please ensure:\n' +
+                    '  1. PAT has "public_repo" scope (for public repos) or "repo" scope (for private repos)\n' +
+                    '  2. PAT owner is a member of OpenRareDisease organization (if it\'s an org repo)');
+                  return;
+                }
+                throw accessError;
+              }
+              
               // 使用 GitHub API 创建 PR
               const { data: pr } = await github.rest.pulls.create({
                 owner: 'OpenRareDisease',
@@ -266,7 +287,7 @@ jobs:
               console.log('✅ Successfully created PR #' + pr.number);
               console.log('🔗 PR URL: ' + pr.html_url);
               
-              // 添加标签
+              // 添加标签（可选，失败不影响 PR 创建）
               try {
                 await github.rest.issues.addLabels({
                   owner: 'OpenRareDisease',
@@ -276,19 +297,51 @@ jobs:
                 });
                 console.log('✅ Added labels: automated, sync');
               } catch (labelError) {
-                console.log('⚠️ Failed to add labels (may not have permission): ' + labelError.message);
+                console.log('⚠️ Failed to add labels (may not have permission, but PR was created): ' + labelError.message);
+                console.log('   This is not critical - PR was successfully created.');
               }
               
               core.setOutput('pr-number', pr.number.toString());
               core.setOutput('pr-url', pr.html_url);
             } catch (error) {
               console.error('❌ Failed to create PR:', error.message);
+              console.error('   Error status:', error.status);
+              console.error('   Error details:', JSON.stringify(error.response?.data || {}, null, 2));
+              
               if (error.status === 403) {
-                core.setFailed('❌ Permission denied. Please ensure PAT has "public_repo" scope and upstream repository allows PRs from forks.');
+                const errorMsg = error.response?.data?.message || error.message;
+                let detailedMsg = '❌ Permission denied. Possible reasons:\n';
+                detailedMsg += '  1. PAT does not have required scope:\n';
+                detailedMsg += '     - For public repos: "public_repo" scope is required\n';
+                detailedMsg += '     - For private repos: "repo" scope is required\n';
+                detailedMsg += '  2. Upstream repository may not allow PRs from forks\n';
+                detailedMsg += '  3. PAT owner may not be a member of OpenRareDisease organization\n';
+                detailedMsg += '  4. Fork may not be properly synced with upstream\n';
+                detailedMsg += '\nOriginal error: ' + errorMsg;
+                core.setFailed(detailedMsg);
               } else if (error.status === 422) {
-                console.log('⚠️ PR might already exist or there are no changes');
-                core.setFailed('PR creation failed: ' + error.message);
+                const errorMsg = error.response?.data?.message || error.message;
+                const errors = error.response?.data?.errors || [];
+                let detailedMsg = '❌ PR creation failed (422 Unprocessable Entity):\n';
+                detailedMsg += '  ' + errorMsg + '\n';
+                if (errors.length > 0) {
+                  detailedMsg += '\n  Details:\n';
+                  errors.forEach(err => {
+                    detailedMsg += '    - ' + JSON.stringify(err) + '\n';
+                  });
+                }
+                detailedMsg += '\nPossible reasons:\n';
+                detailedMsg += '  1. PR already exists from this fork\n';
+                detailedMsg += '  2. No changes between fork and upstream\n';
+                detailedMsg += '  3. Branch name mismatch\n';
+                core.setFailed(detailedMsg);
+              } else if (error.status === 404) {
+                core.setFailed('❌ Repository not found. Please check:\n' +
+                  '  1. Repository name is correct: OpenRareDisease/info_platform\n' +
+                  '  2. Repository exists and is accessible\n' +
+                  '  3. Fork exists: ' + forkOwner + '/info_platform_fork');
               } else {
+                core.setFailed('❌ Unexpected error: ' + error.message + '\nStatus: ' + error.status);
                 throw error;
               }
             }
