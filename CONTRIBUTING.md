@@ -172,6 +172,19 @@ git commit -m "docs: 更新 README 中的安装说明"
 
 ## 🔄 提交 Pull Request
 
+> 💡 **为什么需要这个流程？**
+>
+> 由于 Vercel 免费版的限制：
+>
+> - 只能关联个人 private 仓库
+> - 只有 repo owner 在 `main` 分支的提交才会触发部署
+>
+> 因此，我们需要：
+>
+> 1. 在下游仓库（`demongodYY/info_platform_fork`）开发并提交 PR
+> 2. Owner 合并后触发 Vercel 部署
+> 3. 自动同步到上游仓库（`OpenRareDisease/info_platform`）
+
 ### 1. 保持分支同步
 
 在提交 PR 前，确保你的分支是最新的：
@@ -234,6 +247,76 @@ git push origin feat/your-feature-name
 - 可能需要根据反馈进行修改
 - 审查通过后，Owner 会将 PR 合并到 `main` 分支
 - **只有在 `main` 分支上 Owner 的 merge 或 push 才会触发 Vercel CI/CD**，将更新部署到线上网站 [www.raredisease.top](https://www.raredisease.top)
+
+### 6. 完整开发流程图
+
+```mermaid
+graph TB
+    subgraph "步骤 1: 贡献者开发"
+        A[Fork 仓库] -->|克隆到本地| B[创建功能分支]
+        B -->|编写代码| C[本地开发]
+        C -->|提交代码| D[git commit]
+        D -->|推送到 GitHub| E[git push]
+        E -->|在 GitHub 创建| F[Pull Request]
+    end
+
+    subgraph "步骤 2: 下游仓库审查"
+        F -->|等待 Owner 审查| G{Owner 审查}
+        G -->|需要修改| H[修改代码]
+        H -->|更新 PR| G
+        G -->|审查通过| I[Owner 合并到 main]
+    end
+
+    subgraph "步骤 3: Vercel 自动部署"
+        I -->|Owner 在 main 分支提交| J[Vercel CI/CD 触发]
+        J -->|构建应用| K[执行 prebuild 脚本]
+        K -->|导入文章数据| L[部署到生产环境]
+        L -->|网站更新| M[www.raredisease.top]
+    end
+
+    subgraph "步骤 4: 自动同步到上游"
+        I -->|触发 GitHub Actions| N[检查部署状态]
+        N -->|部署成功| O[对比上游仓库]
+        O -->|有差异| P{已存在<br/>未合并的 PR?}
+        P -->|是| Q[跳过，不创建新 PR<br/>等待现有 PR 处理]
+        P -->|否| R[自动创建 PR]
+        R -->|等待维护者审查| S[上游仓库合并]
+    end
+
+    style A fill:#e1f5ff
+    style I fill:#fff4e1
+    style J fill:#ffe1f5
+    style M fill:#e1ffe1
+    style P fill:#f0e1ff
+```
+
+### 7. 关键注意事项
+
+#### ⚠️ Vercel 部署触发条件
+
+**✅ 会触发部署的情况：**
+
+- Owner (`demongodYY`) 在 `main` 分支上 merge PR
+- Owner (`demongodYY`) 直接 push 到 `main` 分支
+
+**❌ 不会触发部署的情况：**
+
+- 贡献者推送代码到自己的分支
+- 贡献者创建 PR（未合并前）
+- Owner 在其他分支上的提交
+- 其他贡献者合并 PR（如果被授予权限）
+
+#### 📋 完整流程检查清单
+
+- [ ] Fork 了 [下游仓库](https://github.com/demongodYY/info_platform_fork)
+- [ ] 创建了功能分支（如 `feat/your-feature`）
+- [ ] 完成了代码开发
+- [ ] 运行了 `npm run lint` 和 `npm run format:check`
+- [ ] 提交了代码并推送到 GitHub
+- [ ] 在 GitHub 上创建了 Pull Request
+- [ ] 等待 Owner 审查并合并 PR
+- [ ] Owner 合并后，Vercel 会自动部署（无需手动操作）
+- [ ] GitHub Actions 会自动同步到上游仓库（无需手动操作）
 
 ## 🏗️ 项目结构
 
@@ -354,14 +437,42 @@ A:
 - **Owner 提交的 merge 或 push** 才会触发 Vercel CI/CD 自动部署
 - 其他贡献者的提交不会触发部署
 
-流程如下：
+**完整流程**：
 
-1. 推送代码到 GitHub 分支
-2. 在 [下游仓库](https://github.com/demongodYY/info_platform_fork) 创建 Pull Request
-3. 等待 Owner 审查并合并 PR 到 `main` 分支
-4. Owner 的 merge 或 push 到 `main` 分支后自动触发 Vercel CI/CD 部署到 [www.raredisease.top](https://www.raredisease.top)
+```
+贡献者推送代码到分支
+    ↓
+创建 Pull Request（这一步很重要！）
+    ↓
+等待 Owner 审查
+    ↓
+Owner 合并 PR 到 main 分支 ← 只有这里才会触发部署
+    ↓
+Vercel CI/CD 自动部署
+    ↓
+网站更新：www.raredisease.top
+```
+
+**常见误解**：
+
+- ❌ 推送代码到分支就会触发部署 → **错误**，需要创建 PR 并等待 Owner 合并
+- ❌ 创建 PR 就会触发部署 → **错误**，需要 Owner 合并到 `main` 分支
+- ✅ Owner 合并 PR 到 `main` 分支 → **正确**，这会触发部署
 
 这是 Vercel 免费版的限制：只有 repo owner 在 `main` 分支上的提交才会触发部署。
+
+### Q: 我需要手动同步到上游仓库吗？
+
+A: **不需要！** GitHub Actions 会自动处理：
+
+1. Owner 合并 PR 到 `main` 分支后
+2. GitHub Actions workflow 会自动：
+   - 等待 Vercel 部署完成（最多等待 10 分钟）
+   - 检查代码变更（对比上游仓库）
+   - 自动创建 PR 到上游仓库 [OpenRareDisease/info_platform](https://github.com/OpenRareDisease/info_platform)
+3. 你只需要等待上游仓库维护者审查并合并即可
+
+**完全自动化，无需手动操作！** 🎉
 
 ### Q: 如何报告 Bug？
 
