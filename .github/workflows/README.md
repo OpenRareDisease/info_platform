@@ -40,14 +40,19 @@
 
 ### 配置要求
 
-1. **Personal Access Token (PAT)**：
-   - 默认的 `GITHUB_TOKEN` 无法向上游仓库创建 PR
-   - 需要在仓库 Settings → Secrets and variables → Actions 中添加一个名为 `PAT` 的 secret
+1. **Personal Access Token (PAT)**（必需）：
+   - 默认的 `GITHUB_TOKEN` **无法**向上游仓库创建 PR
+   - **必须**在仓库 Settings → Secrets and variables → Actions 中添加一个名为 `PAT` 的 secret
    - PAT 需要以下权限：
      - `public_repo`（如果上游仓库是公开的）
      - `repo`（如果上游仓库是私有的）
-   - 创建 PAT：GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
-   - 如果没有配置 PAT，workflow 会尝试使用 `GITHUB_TOKEN`，但可能会失败
+   - 创建 PAT：
+     1. 访问：GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
+     2. 点击 "Generate new token (classic)"
+     3. 选择 `public_repo` 权限（如果上游仓库是公开的）
+     4. 复制生成的 token
+     5. 在仓库 Settings → Secrets and variables → Actions 中添加 secret，名称为 `PAT`
+   - **如果没有配置 PAT，workflow 会失败并提示错误**
 
 2. **上游仓库权限**：确保上游仓库 `OpenRareDisease/info_platform` 允许从 fork 创建 PR
 
