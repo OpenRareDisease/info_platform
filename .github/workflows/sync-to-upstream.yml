@@ -8,6 +8,11 @@ on:
   workflow_dispatch:
     # 允许手动触发
 
+# 确保 workflow 有权限访问 secrets
+permissions:
+  contents: read
+  pull-requests: write
+
 env:
   UPSTREAM_REPO: OpenRareDisease/info_platform
   UPSTREAM_BRANCH: main
@@ -187,48 +192,65 @@ jobs:
         id: check-pat
         run: |
           # 检查 PAT 是否存在且不为空
+          # 注意：在 shell 中直接使用 ${{ secrets.PAT }} 可能有问题，使用环境变量更安全
           PAT_VALUE="${{ secrets.PAT }}"
           
-          echo "Debug info:"
-          echo "  Repository: ${{ github.repository }}"
-          echo "  Repository owner: ${{ github.repository_owner }}"
-          echo "  Event name: ${{ github.event_name }}"
-          echo "  PAT secret exists: $([ -n "$PAT_VALUE" ] && echo 'yes' || echo 'no')"
-          echo "  PAT length: ${#PAT_VALUE}"
+          echo "=== PAT Configuration Check ==="
+          echo "Repository: ${{ github.repository }}"
+          echo "Repository owner: ${{ github.repository_owner }}"
+          echo "Event name: ${{ github.event_name }}"
+          echo "Event type: ${{ github.event_name }}"
+          echo "Ref: ${{ github.ref }}"
+          echo ""
           
-          if [ -z "$PAT_VALUE" ] || [ "$PAT_VALUE" = "" ]; then
+          # 检查 secret 是否可访问
+          if [ -z "${PAT_VALUE:-}" ]; then
+            echo "❌ PAT secret is empty or not accessible!"
             echo ""
-            echo "❌ PAT secret is not configured or is empty!"
+            echo "Possible reasons:"
+            echo "1. Secret name is incorrect (must be exactly 'PAT', case-sensitive)"
+            echo "2. Secret value is empty (secret exists but has no value)"
+            echo "3. Secret was just created and needs a few seconds to propagate"
+            echo "4. Workflow permissions may not allow access to secrets"
             echo ""
-            echo "Please check:"
+            echo "Please verify:"
             echo "1. Go to: https://github.com/${{ github.repository }}/settings/secrets/actions"
-            echo "2. Verify secret name is exactly 'PAT' (case-sensitive, no spaces)"
-            echo "3. Verify secret value is not empty"
-            echo "4. If secret exists but is empty, delete and recreate it"
+            echo "2. Click on PAT secret to edit"
+            echo "3. Check if Value field shows dots (••••) - this means it has a value"
+            echo "4. If Value field is blank, delete and recreate the secret"
             echo ""
-            echo "Note: Secrets are NOT available for workflows triggered by PRs from forks."
-            echo "This workflow should be triggered by push to main branch, not by PR."
+            echo "If secret exists with value but still not accessible:"
+            echo "- Wait 1-2 minutes after creating/updating secret"
+            echo "- Check repository Actions settings for workflow permissions"
+            echo "- Ensure workflow is triggered by push, not PR from fork"
             exit 1
+          fi
+          
+          # 检查 PAT 长度（GitHub PAT 通常是 40+ 字符）
+          PAT_LENGTH=${#PAT_VALUE}
+          echo "✅ PAT secret is accessible"
+          echo "   PAT length: $PAT_LENGTH characters"
+          
+          if [ "$PAT_LENGTH" -lt 20 ]; then
+            echo "⚠️ Warning: PAT seems too short (expected 40+ chars)"
+            echo "   Please verify the token is complete"
+            exit 1
+          fi
+          
+          # 检查 PAT 格式
+          if [[ "$PAT_VALUE" =~ ^ghp_ ]]; then
+            echo "✅ PAT format looks correct (starts with 'ghp_')"
           else
-            # 检查 PAT 长度（GitHub PAT 通常是 40+ 字符）
-            PAT_LENGTH=${#PAT_VALUE}
-            echo "✅ PAT secret is configured (length: $PAT_LENGTH characters)"
-            
-            if [ "$PAT_LENGTH" -lt 20 ]; then
-              echo "⚠️ Warning: PAT seems too short. Please verify it's correct."
-              echo "   GitHub PATs usually start with 'ghp_' and are 40+ characters long."
-            fi
-            
-            # 检查 PAT 格式
-            if [[ "$PAT_VALUE" =~ ^ghp_ ]]; then
-              echo "✅ PAT format looks correct (starts with 'ghp_')"
-            else
-              echo "⚠️ Warning: PAT doesn't start with 'ghp_'. Please verify it's a valid GitHub PAT."
-            fi
+            echo "⚠️ Warning: PAT doesn't start with 'ghp_'"
+            echo "   Expected format: ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            echo "   Please verify it's a valid GitHub Personal Access Token"
+            exit 1
           fi
           
           # 输出到 output（不包含实际 token）
           echo "pat-configured=true" >> $GITHUB_OUTPUT
+          echo ""
+          echo "✅ PAT configuration check passed"
 
       - name: Create Pull Request using GitHub API
         if: steps.check-changes.outputs.no-changes == 'false' && steps.check-prs.outputs.has-open-pr == 'false' && steps.check-pat.outputs.pat-configured == 'true'
