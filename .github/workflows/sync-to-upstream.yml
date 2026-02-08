@@ -189,66 +189,71 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const commitMessage = '${{ github.event.head_commit.message }}'.replace(/'/g, "\\'");
-            const commitAuthor = '${{ github.event.head_commit.author.name }}';
-            const commitTime = '${{ github.event.head_commit.timestamp }}';
-            const commitSha = '${{ github.sha }}';
-            const repo = '${{ github.repository }}';
-            const beforeSha = '${{ github.event.before }}';
+            // 安全地获取变量，使用 toJSON 来转义特殊字符
+            const commitMessage = ${{ toJSON(github.event.head_commit.message) }};
+            const commitAuthor = ${{ toJSON(github.event.head_commit.author.name) }};
+            const commitTime = ${{ toJSON(github.event.head_commit.timestamp) }};
+            const commitSha = ${{ toJSON(github.sha) }};
+            const repo = ${{ toJSON(github.repository) }};
+            const beforeSha = ${{ toJSON(github.event.before) }};
+            const deploymentStatus = ${{ toJSON(needs.check-deployment.outputs.deployment-status) }};
             
             // 获取部署状态
-            const deploymentStatus = '${{ needs.check-deployment.outputs.deployment-status }}';
             const deploymentStatusEmoji = deploymentStatus === 'success' ? '✅' : '⏰';
             const deploymentStatusText = deploymentStatus === 'success' 
               ? 'Vercel 部署已成功完成' 
               : 'Vercel 部署状态检查超时（可能仍在进行中）';
             
-            // 创建 PR 的 body
-            const prBody = `## 🔄 自动同步更新
-            
-            此 PR 由 GitHub Actions 自动创建，用于同步下游仓库的更新。
-            
-            **来源仓库**: [${repo}](https://github.com/${repo})
-            **提交**: [\`${commitSha.substring(0, 7)}\`](https://github.com/${repo}/commit/${commitSha})
-            **提交信息**: ${commitMessage}
-            **作者**: ${commitAuthor}
-            **提交时间**: ${commitTime}
-            
-            **部署状态**: ${deploymentStatusEmoji} ${deploymentStatusText}
-            
-            ---
-            
-            ### 📋 变更内容
-            
-            本次同步包含以下变更：
-            - 提交 SHA: \`${commitSha}\`
-            - 变更文件: 查看 [文件变更](https://github.com/${repo}/compare/${beforeSha}...${commitSha})
-            
-            ### ✅ 检查清单
-            
-            - [x] Vercel 部署状态已检查
-            - [ ] 代码已通过测试
-            - [ ] 已检查变更内容
-            - [ ] 确认无冲突
-            
-            > ⚠️ **注意**: 此 PR 由自动化流程创建，请仔细审查后再合并。
-            
-            ---
-            
-            *此 PR 由 [GitHub Actions](${process.env.GITHUB_SERVER_URL}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}) 自动创建*`;
+            // 创建 PR 的 body，使用字符串拼接避免模板字符串的问题
+            const prBody = [
+              '## 🔄 自动同步更新',
+              '',
+              '此 PR 由 GitHub Actions 自动创建，用于同步下游仓库的更新。',
+              '',
+              '**来源仓库**: [' + repo + '](https://github.com/' + repo + ')',
+              '**提交**: [`' + commitSha.substring(0, 7) + '`](https://github.com/' + repo + '/commit/' + commitSha + ')',
+              '**提交信息**: ' + commitMessage,
+              '**作者**: ' + commitAuthor,
+              '**提交时间**: ' + commitTime,
+              '',
+              '**部署状态**: ' + deploymentStatusEmoji + ' ' + deploymentStatusText,
+              '',
+              '---',
+              '',
+              '### 📋 变更内容',
+              '',
+              '本次同步包含以下变更：',
+              '- 提交 SHA: `' + commitSha + '`',
+              '- 变更文件: 查看 [文件变更](https://github.com/' + repo + '/compare/' + beforeSha + '...' + commitSha + ')',
+              '',
+              '### ✅ 检查清单',
+              '',
+              '- [x] Vercel 部署状态已检查',
+              '- [ ] 代码已通过测试',
+              '- [ ] 已检查变更内容',
+              '- [ ] 确认无冲突',
+              '',
+              '> ⚠️ **注意**: 此 PR 由自动化流程创建，请仔细审查后再合并。',
+              '',
+              '---',
+              '',
+              '*此 PR 由 [GitHub Actions](' + process.env.GITHUB_SERVER_URL + '/' + repo + '/actions/runs/' + process.env.GITHUB_RUN_ID + ') 自动创建*'
+            ].join('\n');
             
             try {
               // 使用 GitHub API 创建 PR
               // head 格式: owner:branch，指向 fork 仓库的 main 分支
               const [forkOwner] = process.env.GITHUB_REPOSITORY.split('/');
-              console.log(`Creating PR from fork: ${forkOwner}:main`);
+              console.log('Creating PR from fork: ' + forkOwner + ':main');
+              
+              const prTitle = '🔄 Sync from downstream: ' + commitMessage;
               
               const { data: pr } = await github.rest.pulls.create({
                 owner: 'OpenRareDisease',
                 repo: 'info_platform',
-                title: `🔄 Sync from downstream: ${commitMessage}`,
+                title: prTitle,
                 body: prBody,
-                head: `${forkOwner}:main`, // fork 仓库的 main 分支
+                head: forkOwner + ':main', // fork 仓库的 main 分支
                 base: 'main',
               });
               
@@ -280,23 +285,26 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const prNumber = parseInt('${{ steps.check-prs.outputs.pr-number }}');
-            const commitMessage = '${{ github.event.head_commit.message }}'.replace(/'/g, "\\'");
-            const commitSha = '${{ github.sha }}';
-            const repo = '${{ github.repository }}';
-            const beforeSha = '${{ github.event.before }}';
+            const commitMessage = ${{ toJSON(github.event.head_commit.message) }};
+            const commitSha = ${{ toJSON(github.sha) }};
+            const repo = ${{ toJSON(github.repository) }};
+            const beforeSha = ${{ toJSON(github.event.before) }};
+            const commitAuthor = ${{ toJSON(github.event.head_commit.author.name) }};
             
-            const comment = `🔄 **自动更新通知**
-            
-            检测到新的提交，但已存在未合并的同步 PR #${prNumber}。
-            
-            请先合并或关闭现有 PR，然后再创建新的同步 PR。
-            
-            **新提交信息**:
-            - SHA: \`${commitSha.substring(0, 7)}\`
-            - 消息: ${commitMessage}
-            - 作者: ${{ github.event.head_commit.author.name }}
-            
-            [查看变更](https://github.com/${repo}/compare/${beforeSha}...${commitSha})`;
+            const comment = [
+              '🔄 **自动更新通知**',
+              '',
+              '检测到新的提交，但已存在未合并的同步 PR #' + prNumber + '。',
+              '',
+              '请先合并或关闭现有 PR，然后再创建新的同步 PR。',
+              '',
+              '**新提交信息**:',
+              '- SHA: `' + commitSha.substring(0, 7) + '`',
+              '- 消息: ' + commitMessage,
+              '- 作者: ' + commitAuthor,
+              '',
+              '[查看变更](https://github.com/' + repo + '/compare/' + beforeSha + '...' + commitSha + ')'
+            ].join('\n');
             
             await github.rest.issues.createComment({
               owner: 'OpenRareDisease',
