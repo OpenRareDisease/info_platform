@@ -452,25 +452,141 @@ npm run test:coverage
      - 向上游仓库自动创建 Pull Request
    - 上游仓库: [OpenRareDisease/info_platform](https://github.com/OpenRareDisease/info_platform)
 
-### 自动化工作流程
+### 完整开发流程图
 
+```mermaid
+graph TB
+    subgraph "贡献者开发阶段"
+        A[贡献者 Fork 仓库] -->|克隆到本地| B[创建功能分支<br/>feat/xxx]
+        B -->|编写代码| C[本地开发]
+        C -->|提交代码| D[git commit]
+        D -->|推送到 GitHub| E[git push origin feat/xxx]
+        E -->|在 GitHub 创建| F[Pull Request<br/>到下游仓库]
+    end
+
+    subgraph "下游仓库: demongodYY/info_platform_fork"
+        F -->|等待 Owner 审查| G{Owner 审查 PR}
+        G -->|需要修改| H[贡献者修改代码]
+        H -->|更新 PR| G
+        G -->|审查通过| I[Owner 合并 PR<br/>到 main 分支]
+    end
+
+    subgraph "Vercel 部署阶段"
+        I -->|触发条件检查| J{是否 Owner 在<br/>main 分支的提交?}
+        J -->|是| K[Vercel CI/CD<br/>自动触发部署]
+        J -->|否| L[不触发部署<br/>⚠️ 其他贡献者提交]
+        K -->|构建应用| M[执行 prebuild 脚本]
+        M -->|导入文章数据| N[部署到生产环境]
+        N -->|访问| O[www.raredisease.top<br/>✅ 网站更新]
+    end
+
+    subgraph "自动同步到上游仓库"
+        I -->|触发 GitHub Actions| P[检查 Vercel 部署状态]
+        P -->|等待最多 10 分钟| Q{部署成功?}
+        Q -->|失败| R[停止流程<br/>不创建 PR]
+        Q -->|成功/超时| S[检查代码变更]
+        S -->|对比上游仓库| T{是否有差异?}
+        T -->|无差异| U[无需同步]
+        T -->|有差异| V{已存在<br/>未合并的 PR?}
+        V -->|是| W[跳过，不创建新 PR<br/>等待现有 PR 处理]
+        V -->|否| X[自动创建 PR<br/>到上游仓库]
+    end
+
+    subgraph "上游仓库: OpenRareDisease/info_platform"
+        X -->|等待维护者审查| Y[上游仓库维护者<br/>审查并合并]
+        W -->|等待现有 PR 处理| Y
+        Y -->|合并完成| Z[✅ 代码同步完成]
+    end
+
+    style A fill:#e1f5ff
+    style I fill:#fff4e1
+    style K fill:#ffe1f5
+    style O fill:#e1ffe1
+    style X fill:#f0e1ff
+    style Z fill:#e1ffe1
+    style L fill:#ffe1e1
+    style R fill:#ffe1e1
 ```
-Owner 在 main 分支上 merge PR 或直接 push
-    ↓
-Vercel CI/CD 自动触发部署（只有 Owner 的提交）
-    ↓
-GitHub Actions 自动触发
-    ↓
-检查 Vercel 部署状态（最多等待 10 分钟）
-    ↓
-部署成功或超时
-    ↓
-检查是否有变更（与上游仓库对比）
-    ↓
-检查是否存在未合并的同步 PR
-    ↓
-自动创建 PR 到上游仓库 ✨
+
+### 关键触发点说明
+
+1. **Vercel 部署触发条件** ⚠️
+   - ✅ **会触发**：Owner (`demongodYY`) 在 `main` 分支上的 merge 或 push
+   - ❌ **不会触发**：其他贡献者推送代码到分支或创建 PR（未合并前）
+   - ❌ **不会触发**：Owner 在其他分支上的提交
+
+2. **GitHub Actions 同步触发条件**
+   - ✅ **会触发**：Owner 在 `main` 分支上的提交（merge 或 push）
+   - ✅ **自动执行**：检查 Vercel 部署状态 → 对比上游仓库 → 创建同步 PR
+
+3. **部署流程**
+   - Owner 合并 PR 到 `main` 分支
+   - Vercel 检测到 Owner 的提交，自动触发构建
+   - 执行 `prebuild` 脚本导入文章数据
+   - 部署到生产环境，网站更新
+
+### 详细步骤说明
+
+#### 步骤 1: 贡献者开发代码
+
+```bash
+# 1. Fork 下游仓库（如果还没有）
+# 访问 https://github.com/demongodYY/info_platform_fork
+# 点击右上角的 "Fork" 按钮
+
+# 2. 克隆你的 Fork 到本地
+git clone https://github.com/YOUR_USERNAME/info_platform_fork.git
+cd info_platform_fork
+
+# 3. 创建功能分支
+git checkout -b feat/your-feature-name
+
+# 4. 进行开发并提交代码
+git add .
+git commit -m "feat: 你的功能描述"
+
+# 5. 推送到你的 Fork
+git push origin feat/your-feature-name
 ```
+
+#### 步骤 2: 创建 Pull Request
+
+1. **访问下游仓库**：[https://github.com/demongodYY/info_platform_fork](https://github.com/demongodYY/info_platform_fork)
+2. **创建 PR**：
+   - 点击 "Compare & pull request" 按钮
+   - 填写 PR 标题和描述
+   - 选择 `base: main` ← `compare: feat/your-feature-name`
+   - 点击 "Create pull request"
+3. **等待 Owner 审查**：Owner 会审查你的代码，可能需要修改
+
+#### 步骤 3: Owner 合并触发部署 ⚠️
+
+**重要**：只有 Owner 合并 PR 到 `main` 分支后，才会触发后续流程：
+
+1. **Owner 审查并合并 PR**
+   - Owner 在 GitHub 上审查你的 PR
+   - 如果需要修改，Owner 会提出反馈
+   - 审查通过后，Owner 点击 "Merge pull request"
+   - PR 被合并到 `main` 分支
+
+2. **Vercel 自动部署**（自动触发，无需手动操作）
+   - Vercel 检测到 Owner 在 `main` 分支的提交
+   - 自动触发 CI/CD 构建流程
+   - 执行 `prebuild` 脚本导入文章数据
+   - 部署到生产环境
+   - 网站更新：https://www.raredisease.top
+
+3. **GitHub Actions 自动同步**（自动触发，无需手动操作）
+   - GitHub Actions workflow 检测到 Owner 的提交
+   - 等待 Vercel 部署完成（最多等待 10 分钟）
+   - 检查代码变更（对比上游仓库）
+   - 自动创建 PR 到上游仓库：[OpenRareDisease/info_platform](https://github.com/OpenRareDisease/info_platform)
+
+#### 步骤 4: 上游仓库合并（可选）
+
+- 上游仓库维护者会审查自动创建的 PR
+- 审查通过后合并到上游仓库
+- 代码同步完成 ✅
 
 ### 工作流程示例
 
@@ -486,11 +602,11 @@ git push origin feat/new-feature
 # 点击 "Compare & pull request" 创建 PR
 # 等待 Owner 审查并合并
 
-# 3. Owner 合并后，会自动触发：
-#    - Vercel CI/CD 自动部署到线上网站
-#    - GitHub Actions 自动检测部署状态
-#    - 检查变更并自动向上游仓库创建 PR
-#    无需手动操作！🎉
+# 3. Owner 合并后，会自动触发（无需手动操作）：
+#    ✅ Vercel CI/CD 自动部署到线上网站
+#    ✅ GitHub Actions 自动检测部署状态
+#    ✅ 检查变更并自动向上游仓库创建 PR
+#    🎉 完全自动化！
 ```
 
 ### 配置要求
