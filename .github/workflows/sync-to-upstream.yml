@@ -182,101 +182,63 @@ jobs:
               core.setOutput('has-open-pr', 'false');
             }
 
-      - name: Create Pull Request using GitHub API
+      - name: Create Pull Request
         if: steps.check-changes.outputs.no-changes == 'false' && steps.check-prs.outputs.has-open-pr == 'false'
         id: create-pr
-        uses: actions/github-script@v7
+        uses: peter-evans/create-pull-request@v6
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            // 安全地获取变量，使用 toJSON 来转义特殊字符
-            const commitMessage = ${{ toJSON(github.event.head_commit.message) }};
-            const commitAuthor = ${{ toJSON(github.event.head_commit.author.name) }};
-            const commitTime = ${{ toJSON(github.event.head_commit.timestamp) }};
-            const commitSha = ${{ toJSON(github.sha) }};
-            const repo = ${{ toJSON(github.repository) }};
-            const beforeSha = ${{ toJSON(github.event.before) }};
-            const deploymentStatus = ${{ toJSON(needs.check-deployment.outputs.deployment-status) }};
+          # 使用 PAT 如果有配置，否则使用 GITHUB_TOKEN
+          token: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
+          # 目标仓库（上游仓库）
+          repo: ${{ env.UPSTREAM_REPO }}
+          # 从当前 fork 的 main 分支创建 PR
+          head: ${{ github.repository_owner }}:main
+          # 目标分支
+          base: ${{ env.UPSTREAM_BRANCH }}
+          # PR 标题
+          title: '🔄 Sync from downstream: ${{ github.event.head_commit.message }}'
+          # PR body
+          body: |
+            ## 🔄 自动同步更新
             
-            // 获取部署状态
-            const deploymentStatusEmoji = deploymentStatus === 'success' ? '✅' : '⏰';
-            const deploymentStatusText = deploymentStatus === 'success' 
-              ? 'Vercel 部署已成功完成' 
-              : 'Vercel 部署状态检查超时（可能仍在进行中）';
+            此 PR 由 GitHub Actions 自动创建，用于同步下游仓库的更新。
             
-            // 创建 PR 的 body，使用字符串拼接避免模板字符串的问题
-            const prBody = [
-              '## 🔄 自动同步更新',
-              '',
-              '此 PR 由 GitHub Actions 自动创建，用于同步下游仓库的更新。',
-              '',
-              '**来源仓库**: [' + repo + '](https://github.com/' + repo + ')',
-              '**提交**: [`' + commitSha.substring(0, 7) + '`](https://github.com/' + repo + '/commit/' + commitSha + ')',
-              '**提交信息**: ' + commitMessage,
-              '**作者**: ' + commitAuthor,
-              '**提交时间**: ' + commitTime,
-              '',
-              '**部署状态**: ' + deploymentStatusEmoji + ' ' + deploymentStatusText,
-              '',
-              '---',
-              '',
-              '### 📋 变更内容',
-              '',
-              '本次同步包含以下变更：',
-              '- 提交 SHA: `' + commitSha + '`',
-              '- 变更文件: 查看 [文件变更](https://github.com/' + repo + '/compare/' + beforeSha + '...' + commitSha + ')',
-              '',
-              '### ✅ 检查清单',
-              '',
-              '- [x] Vercel 部署状态已检查',
-              '- [ ] 代码已通过测试',
-              '- [ ] 已检查变更内容',
-              '- [ ] 确认无冲突',
-              '',
-              '> ⚠️ **注意**: 此 PR 由自动化流程创建，请仔细审查后再合并。',
-              '',
-              '---',
-              '',
-              '*此 PR 由 [GitHub Actions](' + process.env.GITHUB_SERVER_URL + '/' + repo + '/actions/runs/' + process.env.GITHUB_RUN_ID + ') 自动创建*'
-            ].join('\n');
+            **来源仓库**: [${{ github.repository }}](https://github.com/${{ github.repository }})
+            **提交**: [`${{ github.sha }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+            **提交信息**: ${{ github.event.head_commit.message }}
+            **作者**: ${{ github.event.head_commit.author.name }}
+            **提交时间**: ${{ github.event.head_commit.timestamp }}
             
-            try {
-              // 使用 GitHub API 创建 PR
-              // head 格式: owner:branch，指向 fork 仓库的 main 分支
-              const [forkOwner] = process.env.GITHUB_REPOSITORY.split('/');
-              console.log('Creating PR from fork: ' + forkOwner + ':main');
-              
-              const prTitle = '🔄 Sync from downstream: ' + commitMessage;
-              
-              const { data: pr } = await github.rest.pulls.create({
-                owner: 'OpenRareDisease',
-                repo: 'info_platform',
-                title: prTitle,
-                body: prBody,
-                head: forkOwner + ':main', // fork 仓库的 main 分支
-                base: 'main',
-              });
-              
-              console.log(`✅ Successfully created PR #${pr.number}`);
-              console.log(`🔗 PR URL: ${pr.html_url}`);
-              
-              // 添加标签
-              await github.rest.issues.addLabels({
-                owner: 'OpenRareDisease',
-                repo: 'info_platform',
-                issue_number: pr.number,
-                labels: ['automated', 'sync'],
-              });
-              
-              core.setOutput('pr-number', pr.number.toString());
-              core.setOutput('pr-url', pr.html_url);
-            } catch (error) {
-              console.error('❌ Failed to create PR:', error.message);
-              if (error.status === 422) {
-                console.log('⚠️ PR might already exist or there are no changes');
-              }
-              throw error;
-            }
+            **部署状态**: ${{ needs.check-deployment.outputs.deployment-status == 'success' && '✅ Vercel 部署已成功完成' || '⏰ Vercel 部署状态检查超时（可能仍在进行中）' }}
+            
+            ---
+            
+            ### 📋 变更内容
+            
+            本次同步包含以下变更：
+            - 提交 SHA: `${{ github.sha }}`
+            - 变更文件: 查看 [文件变更](https://github.com/${{ github.repository }}/compare/${{ github.event.before }}...${{ github.sha }})
+            
+            ### ✅ 检查清单
+            
+            - [x] Vercel 部署状态已检查
+            - [ ] 代码已通过测试
+            - [ ] 已检查变更内容
+            - [ ] 确认无冲突
+            
+            > ⚠️ **注意**: 此 PR 由自动化流程创建，请仔细审查后再合并。
+            
+            ---
+            
+            *此 PR 由 [GitHub Actions](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) 自动创建*
+          # 标签
+          labels: |
+            automated
+            sync
+          # 不删除分支
+          delete-branch: false
+          # 不创建 draft PR
+          draft: false
 
       - name: Comment on existing PR
         if: steps.check-changes.outputs.no-changes == 'false' && steps.check-prs.outputs.has-open-pr == 'true'
