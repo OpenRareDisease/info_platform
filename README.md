@@ -389,10 +389,32 @@ npm run format:check
 2. **Owner 合并触发 CD**
    - Owner 审查并合并 PR 到主分支
    - Owner 的提交会触发 Vercel CI/CD 自动部署
+   - **GitHub Actions 会自动检测部署状态**（最多等待 10 分钟）
 
-3. **同步到上游仓库**
-   - CD 部署成功后，再向上游仓库提交 Pull Request
+3. **自动同步到上游仓库**
+   - 部署成功后，GitHub Actions workflow 会自动：
+     - 检查当前分支与上游分支的差异
+     - 检查是否已存在未合并的同步 PR
+     - 向上游仓库自动创建 Pull Request
    - 上游仓库: [OpenRareDisease/info_platform](https://github.com/OpenRareDisease/info_platform)
+
+### 自动化工作流程
+
+```
+代码推送到 main 分支（Owner 合并 PR 后）
+    ↓
+GitHub Actions 自动触发
+    ↓
+检查 Vercel 部署状态（最多等待 10 分钟）
+    ↓
+部署成功或超时
+    ↓
+检查是否有变更（与上游仓库对比）
+    ↓
+检查是否存在未合并的同步 PR
+    ↓
+自动创建 PR 到上游仓库 ✨
+```
 
 ### 工作流程示例
 
@@ -406,15 +428,31 @@ git push origin feat/new-feature
 # 2. 在 GitHub 上创建 PR 给 Owner
 # 等待 Owner 审查并合并
 
-# 3. Owner 合并后，同步到上游仓库
-git remote add upstream https://github.com/OpenRareDisease/info_platform.git
-git fetch upstream
-git checkout main
-git pull origin main
-git push upstream main  # 或创建 PR 到上游仓库
+# 3. Owner 合并后，GitHub Actions 会自动：
+#    - 等待 Vercel 部署完成
+#    - 检查变更
+#    - 自动向上游仓库创建 PR
+#    无需手动操作！🎉
 ```
 
-> ⚠️ **重要**: 只有仓库 Owner 的提交才能触发 Vercel CD，因此必须先通过 PR 让 Owner 合并，然后再同步到上游仓库。
+### 配置要求
+
+**重要**：要启用自动同步功能，需要配置以下内容：
+
+1. **Personal Access Token (PAT)**：
+   - 在仓库 Settings → Secrets → Actions 中添加名为 `PAT` 的 secret
+   - PAT 需要 `public_repo` 权限（如果上游仓库是公开的）
+   - 创建 PAT：GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)
+   - 详细配置说明请参考 [.github/workflows/README.md](.github/workflows/README.md)
+
+2. **Workflow 权限**：
+   - 确保仓库 Actions 设置允许 workflow 访问 secrets
+   - 确保 "Workflow permissions" 设置为 "Read and write permissions"
+
+> ⚠️ **重要**: 
+> - 只有仓库 Owner（`demongodYY`）的提交才会触发自动同步 workflow
+> - 如果已存在未合并的同步 PR，workflow 不会创建新 PR，而是在现有 PR 中添加评论
+> - 如果检测到部署失败，workflow 会停止，不会创建 PR
 
 ## 📖 相关文档
 
