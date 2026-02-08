@@ -382,7 +382,7 @@ npm run format:check
 
 ### 流程说明
 
-1. **在个人仓库开发并提交 PR**
+1. **在[下游仓库](https://github.com/demongodYY/info_platform_fork)开发并提交 PR**
    - 在个人 fork 仓库（当前仓库）创建功能分支进行开发
    - 创建 Pull Request 提交给仓库 Owner
 
@@ -397,7 +397,7 @@ npm run format:check
 ### 工作流程示例
 
 ```bash
-# 1. 在个人仓库创建功能分支
+# 1. 在[下游仓库](https://github.com/demongodYY/info_platform_fork)创建功能分支
 git checkout -b feat/new-feature
 git add .
 git commit -m "feat: 添加新功能"
