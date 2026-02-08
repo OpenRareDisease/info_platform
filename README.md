@@ -8,7 +8,55 @@
 
 ## 🏗️ 架构图
 
-<img width="3070" height="1684" alt="Architecture Diagram" src="https://github.com/user-attachments/assets/a09f8149-36ed-4f0a-9ce1-dfe9424f4614" />
+```mermaid
+graph TB
+    subgraph "数据采集层"
+        A[罕见病新闻网站] -->|爬取| B[rare_disease_bot<br/>Python 爬虫]
+        B -->|Playwright| C[浏览器自动化]
+        C -->|LangChain + Qwen3-max| D[智能分析 & 翻译]
+        D -->|生成 Markdown| E[server/articles/<br/>YYYYMMDD/域名/]
+        E -->|专业版| F[markdown_professional/]
+        E -->|小白版| G[markdown_simplified/]
+    end
+
+    subgraph "数据导入层"
+        H[Vercel Build] -->|prebuild 脚本| I[import-articles.js]
+        I -->|读取 Markdown| E
+        I -->|解析元数据| J[提取标题/分类/链接]
+        J -->|REST API| K[Supabase<br/>PostgreSQL]
+    end
+
+    subgraph "应用服务层"
+        K -->|查询| L[Nuxt Server API]
+        L -->|/api/notes| M[文章列表 API]
+        L -->|/api/notes/[id]| N[文章详情 API]
+        L -->|/api/notes.post| O[创建文章 API]
+    end
+
+    subgraph "前端展示层"
+        M -->|SSR| P[Nuxt 3 应用]
+        N -->|SSR| P
+        O -->|SSR| P
+        P -->|Vue 3 + TypeScript| Q[文章列表页]
+        P -->|Markdown-it| R[文章详情页]
+        P -->|编辑功能| S[文章编辑页]
+    end
+
+    subgraph "部署层"
+        T[GitHub 仓库] -->|CI/CD| H
+        H -->|部署| U[Vercel<br/>www.raredisease.top]
+        U -->|访问| Q
+        U -->|访问| R
+        U -->|访问| S
+    end
+
+    style A fill:#e1f5ff
+    style B fill:#fff4e1
+    style D fill:#ffe1f5
+    style K fill:#e1ffe1
+    style P fill:#f0e1ff
+    style U fill:#ffe1e1
+```
 
 ## ✨ 功能特性
 
