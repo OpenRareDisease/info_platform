@@ -169,7 +169,9 @@ npm run dev
 npm run build
 ```
 
-构建时会自动执行 `prebuild` 脚本，将 `server/articles/` 目录下当天的文章导入到 Supabase。
+构建时会自动执行 `prebuild` 脚本，将 `server/articles/` 目录下**当天**的文章导入到 Supabase。
+
+> 📝 **提示**：如果需要添加新文章，请先运行爬虫（见下方 [使用 rare_disease_bot 爬虫](#-使用-rare_disease_bot-爬虫）部分），然后将文章文件提交并推送代码。
 
 ### 5. 预览生产构建
 
@@ -179,21 +181,22 @@ npm run preview
 
 ## 📝 使用 rare_disease_bot 爬虫
 
-`rare_disease_bot` 是一个独立的 Python 子项目，用于爬取罕见病新闻。
+`rare_disease_bot` 是一个独立的 Python 子项目，用于爬取罕见病新闻。**需要手动在本地运行爬虫来爬取文章**。
 
 ### 安装爬虫依赖
 
 ```bash
+# 进入爬虫目录
 cd rare_disease_bot
 
 # 创建虚拟环境
 python3 -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
-# 安装依赖
+# 安装 Python 依赖
 pip install -r requirements.txt
 
-# 安装浏览器
+# 安装浏览器依赖（必需）
 playwright install chromium
 ```
 
@@ -210,19 +213,54 @@ MODEL_NAME=qwen-max
 ### 运行爬虫
 
 ```bash
-# 基本用法
-python main.py --url https://rarediseases.org/news/
+# 基本用法（建议限制数量，不要爬太多）
+python main.py --url https://rarediseases.org/news/ --max-articles 1
 
-# 限制文章数量
+# 限制文章数量（推荐）
 python main.py --url https://rarediseases.org/news/ --max-articles 20
 
-# 详细输出
-python main.py --url https://rarediseases.org/news/ --verbose
+# 详细输出模式
+python main.py --url https://rarediseases.org/news/ --max-articles 1 --verbose
 ```
 
-爬取的文章会保存到 `server/articles/YYYYMMDD/域名/` 目录下，包含：
-- `markdown_professional/` - 专业版中文翻译
-- `markdown_simplified/` - 小白版中文翻译
+> 💡 **提示**：建议使用 `--max-articles` 参数限制爬取数量，避免一次性爬取过多文章。
+
+### 爬虫工作流程
+
+1. **浏览器自动启动**：爬虫会自动启动浏览器并访问目标网站
+2. **智能分析**：使用 Qwen3-max 大模型分析页面结构
+3. **内容提取**：提取文章完整内容
+4. **智能翻译**：自动翻译成中文，生成两个版本：
+   - `markdown_professional/` - 专业版中文翻译（保持原文专业性）
+   - `markdown_simplified/` - 小白版中文翻译（通俗易懂）
+5. **自动保存**：文章会自动保存到 `server/articles/YYYYMMDDHHMM/域名/` 目录
+
+### 数据更新流程
+
+爬虫运行完成后，需要将代码提交并推送以触发数据导入：
+
+```bash
+# 1. 查看生成的文章文件
+ls server/articles/
+
+# 2. 提交代码（包含爬取的文章）
+git add server/articles/
+git commit -m "chore: 添加爬取的文章"
+
+# 3. 推送到远程仓库
+git push origin main
+```
+
+**自动导入流程**：
+1. 代码推送到 GitHub 后触发 Vercel CI/CD
+2. Vercel 构建时执行 `prebuild` 脚本（`server/scripts/import-articles.js`）
+3. 脚本扫描 `server/articles/` 目录下**当天**的文章（按年月日匹配）
+4. 只导入 `markdown_professional/` 目录下的专业版文章
+5. 解析文章标题、分类、原文链接等元数据
+6. 通过 Supabase REST API 导入到数据库
+7. 部署成功后，文章会自动出现在网站上
+
+> ⚠️ **注意**：只有当天（按年月日）的文章会被导入，确保爬虫在同一天运行并推送代码。
 
 详细使用说明请参考 [rare_disease_bot/README.md](./rare_disease_bot/README.md)
 
@@ -247,9 +285,11 @@ Vercel 会自动检测 Nuxt 项目并配置构建命令。每次推送到主分�
 
 1. 执行 `npm run build`
 2. 自动运行 `prebuild` 脚本（`server/scripts/import-articles.js`）
-3. 扫描 `server/articles/` 目录下当天的文章
-4. 将文章导入到 Supabase 数据库
-5. 构建 Nuxt 应用
+3. 脚本扫描 `server/articles/` 目录下**当天**的文章（按年月日匹配，格式：`YYYYMMDDHHMM`）
+4. 只导入 `markdown_professional/` 目录下的专业版文章
+5. 解析文章元数据（标题、分类、原文链接）并导入到 Supabase 数据库
+6. 构建 Nuxt 应用
+7. 部署成功后，新文章会自动出现在网站上
 
 ## 📚 开发指南
 
@@ -279,9 +319,44 @@ npm run format:check
 
 ### 数据流程
 
-1. **爬取阶段**：`rare_disease_bot` 爬取文章并保存为 Markdown 文件
-2. **导入阶段**：构建时通过 `import-articles.js` 脚本导入到 Supabase
-3. **展示阶段**：Nuxt 应用从 Supabase 读取数据并渲染
+1. **爬取阶段**：
+   - 手动运行 `rare_disease_bot` 爬取文章
+   - 爬虫使用 Qwen3-max 大模型进行智能分析和翻译
+   - 自动保存到 `server/articles/YYYYMMDDHHMM/域名/` 目录
+   - 生成专业版和小白版两个 Markdown 文件
+
+2. **提交阶段**：
+   - 将爬取的文章文件提交到 Git
+   - 推送到 GitHub 触发 CI/CD
+
+3. **导入阶段**：
+   - Vercel 构建时自动执行 `prebuild` 脚本
+   - 扫描当天（按年月日）的文章目录
+   - 只导入 `markdown_professional/` 专业版文章
+   - 解析元数据并通过 Supabase REST API 导入数据库
+
+4. **展示阶段**：
+   - Nuxt 应用从 Supabase 读取数据
+   - 通过 SSR 渲染文章列表和详情页
+   - 用户可以在网站上查看爬取的文章
+
+### 手动创建文章
+
+除了通过爬虫自动爬取，你也可以在网站上手动创建文章：
+
+1. 访问网站的文章编辑页面
+2. 填写文章信息：
+   - **标题**：文章标题
+   - **标签**：使用逗号分隔，如 `标签一,标签二`
+   - **原文链接**：原始文章的 URL
+   - **内容**：使用 Markdown 格式编写文章内容
+3. 点击保存，文章会立即保存到数据库并显示在文章列表中
+
+### 文章管理
+
+- **查看文章**：在文章列表页查看所有文章
+- **查看文章详情**：点击文章标题或 "View detail" 查看完整内容
+- **删除文章**：在 Supabase 数据库中可以直接删除不需要的文章
 
 ### API 路由
 
