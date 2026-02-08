@@ -29,8 +29,8 @@ graph TB
     subgraph "应用服务层"
         K -->|查询| L[Nuxt Server API]
         L -->|/api/notes| M[文章列表 API]
-        L -->|/api/notes/[id]| N[文章详情 API]
-        L -->|/api/notes.post| O[创建文章 API]
+        L -->|/api/notes/:id| N[文章详情 API]
+        L -->|POST /api/notes| O[创建文章 API]
     end
 
     subgraph "前端展示层"
