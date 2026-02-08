@@ -15,17 +15,17 @@ env:
   UPSTREAM_BRANCH: main
 
 jobs:
-  sync-to-upstream:
-    name: Sync downstream → upstream
+  check-deployment:
+    name: Wait for Vercel Deployment
     runs-on: ubuntu-latest
 
-    # 只允许仓库 owner 本人触发（避免 bot / fork / dependabot 拿不到 secrets）
+    # 只在下游仓库 + 你本人触发时跑（避免 bot / 外部触发导致 secrets / 状态异常）
     if: github.repository_owner == 'demongodYY' && github.actor == 'demongodYY'
 
+    outputs:
+      deployment-status: ${{ steps.check.outputs.status }}
+
     steps:
-      # ------------------------------------------------------------
-      # 基础调试信息（不涉及 secrets）
-      # ------------------------------------------------------------
       - name: Debug context
         run: |
           echo "🔎 Debug context"
@@ -35,9 +35,138 @@ jobs:
           echo "sha:   $GITHUB_SHA"
           echo "repo:  $GITHUB_REPOSITORY"
 
-      # ------------------------------------------------------------
-      # Checkout
-      # ------------------------------------------------------------
+      - name: Check Vercel deployment status
+        id: check
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const commitSha = process.env.GITHUB_SHA;
+
+            const maxWaitTime = 10 * 60 * 1000; // 10 min
+            const checkInterval = 30 * 1000;    // 30 sec
+            const startTime = Date.now();
+
+            const owner = process.env.GITHUB_REPOSITORY_OWNER;
+            const repo = process.env.GITHUB_REPOSITORY.split('/')[1];
+
+            console.log(`🔍 Checking deployment status for commit: ${commitSha}`);
+            console.log(`Repo: ${owner}/${repo}`);
+
+            while (Date.now() - startTime < maxWaitTime) {
+              try {
+                // 1) Deployments API（有些集成会用 deployment）
+                const { data: deployments } = await github.rest.repos.listDeployments({
+                  owner,
+                  repo,
+                  sha: commitSha,
+                  per_page: 1,
+                });
+
+                if (deployments.length > 0) {
+                  const deployment = deployments[0];
+                  console.log(`📦 Found deployment: ${deployment.id}`);
+
+                  const { data: statuses } = await github.rest.repos.listDeploymentStatuses({
+                    owner,
+                    repo,
+                    deployment_id: deployment.id,
+                    per_page: 5,
+                  });
+
+                  if (statuses.length > 0) {
+                    const status = statuses[0];
+                    console.log(`📊 Deployment status: ${status.state}`);
+
+                    if (status.state === 'success') {
+                      console.log('✅ Deployment succeeded!');
+                      core.setOutput('status', 'success');
+                      return;
+                    }
+                    if (status.state === 'failure' || status.state === 'error') {
+                      console.log(`❌ Deployment failed: ${status.state}`);
+                      core.setOutput('status', 'failure');
+                      return;
+                    }
+                  } else {
+                    console.log('ℹ️ Deployment exists but no status yet');
+                  }
+                } else {
+                  console.log('ℹ️ No deployment object found yet');
+                }
+
+                // 2) Combined Status（Vercel 常用 commit status / check）
+                const { data: combined } = await github.rest.repos.getCombinedStatusForRef({
+                  owner,
+                  repo,
+                  ref: commitSha,
+                });
+
+                const statuses = combined.statuses || [];
+                const vercelLike = statuses.find(s => {
+                  const ctx = (s.context || '').toLowerCase();
+                  return ctx.includes('vercel');
+                });
+
+                if (vercelLike) {
+                  console.log(`📊 Vercel-like status context: ${vercelLike.context}`);
+                  console.log(`📊 Vercel-like status state: ${vercelLike.state}`);
+
+                  if (vercelLike.state === 'success') {
+                    console.log('✅ Vercel deployment succeeded!');
+                    core.setOutput('status', 'success');
+                    return;
+                  }
+                  if (vercelLike.state === 'failure' || vercelLike.state === 'error') {
+                    console.log(`❌ Vercel deployment failed: ${vercelLike.state}`);
+                    core.setOutput('status', 'failure');
+                    return;
+                  }
+                } else {
+                  console.log('ℹ️ No vercel-like commit status found yet');
+                }
+
+                console.log('⏳ Deployment in progress, waiting...');
+                await new Promise(r => setTimeout(r, checkInterval));
+              } catch (error) {
+                console.log(`⚠️ Error checking deployment: ${error.message}`);
+                await new Promise(r => setTimeout(r, checkInterval));
+              }
+            }
+
+            console.log('⏰ Timeout reached, assuming deployment will succeed');
+            core.setOutput('status', 'timeout');
+
+  sync-to-upstream:
+    name: Create PR to Upstream
+    needs: check-deployment
+    runs-on: ubuntu-latest
+
+    # 只在你本人触发 + 部署成功或超时才继续
+    if: >
+      github.repository_owner == 'demongodYY' &&
+      github.actor == 'demongodYY' &&
+      (needs.check-deployment.outputs.deployment-status == 'success' ||
+       needs.check-deployment.outputs.deployment-status == 'timeout')
+
+    steps:
+      - name: Debug gate result
+        run: |
+          echo "✅ Passed deployment gate"
+          echo "deployment-status: ${{ needs.check-deployment.outputs.deployment-status }}"
+
+      - name: Debug PAT presence (masked)
+        env:
+          PAT_TOKEN: ${{ secrets.PAT }}
+        run: |
+          echo "🔐 PAT debug (masked)"
+          if [ -z "$PAT_TOKEN" ]; then
+            echo "❌ PAT secret is empty/unavailable in this run context"
+            exit 1
+          fi
+          echo "✅ PAT is available"
+          echo "PAT length: ${#PAT_TOKEN}"
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -48,17 +177,11 @@ jobs:
           git config --global user.name  "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      # ------------------------------------------------------------
-      # 添加并拉取 upstream
-      # ------------------------------------------------------------
-      - name: Add upstream remote
+      - name: Add upstream remote + fetch
         run: |
           git remote add upstream https://github.com/${{ env.UPSTREAM_OWNER }}/${{ env.UPSTREAM_REPO }}.git || true
           git fetch upstream ${{ env.UPSTREAM_BRANCH }}
 
-      # ------------------------------------------------------------
-      # 检查是否有差异
-      # ------------------------------------------------------------
       - name: Check for changes
         id: diff
         run: |
@@ -71,35 +194,22 @@ jobs:
             git diff --stat HEAD upstream/${{ env.UPSTREAM_BRANCH }}
           fi
 
-      # ------------------------------------------------------------
-      # 使用 PAT 调试：能否访问 upstream（不泄露 token）
-      # ------------------------------------------------------------
       - name: Debug PAT access to upstream repo
         if: steps.diff.outputs.no-changes == 'false'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.PAT }}
           script: |
-            console.log('🔐 PAT provided to github-script');
+            console.log('🔐 PAT is provided to github-script (value not printed).');
 
-            try {
-              const { data } = await github.rest.repos.get({
-                owner: process.env.UPSTREAM_OWNER,
-                repo: process.env.UPSTREAM_REPO,
-              });
+            const { data } = await github.rest.repos.get({
+              owner: process.env.UPSTREAM_OWNER,
+              repo: process.env.UPSTREAM_REPO,
+            });
 
-              console.log(`✅ Can access upstream repo: ${data.full_name}`);
-              console.log(`   Visibility: ${data.private ? 'private' : 'public'}`);
-            } catch (err) {
-              console.error('❌ Cannot access upstream repo');
-              console.error('Status:', err.status);
-              console.error('Message:', err.message);
-              throw err;
-            }
+            console.log(`✅ Can access upstream repo: ${data.full_name}`);
+            console.log(`   Visibility: ${data.private ? 'private' : 'public'}`);
 
-      # ------------------------------------------------------------
-      # 检查是否已有未合并 PR
-      # ------------------------------------------------------------
       - name: Check existing PRs
         if: steps.diff.outputs.no-changes == 'false'
         id: pr-check
@@ -115,10 +225,11 @@ jobs:
               owner,
               repo,
               state: 'open',
+              per_page: 100,
             });
 
             const existing = prs.find(pr =>
-              pr.head.repo.full_name === fork &&
+              pr.head.repo?.full_name === fork &&
               pr.head.ref === 'main'
             );
 
@@ -126,14 +237,12 @@ jobs:
               console.log(`⚠️ Existing PR found: #${existing.number}`);
               core.setOutput('exists', 'true');
               core.setOutput('number', existing.number.toString());
+              core.setOutput('url', existing.html_url);
             } else {
-              console.log('✅ No existing PR found');
+              console.log('✅ No existing sync PR found');
               core.setOutput('exists', 'false');
             }
 
-      # ------------------------------------------------------------
-      # 创建 PR（关键：不再自己读 env token）
-      # ------------------------------------------------------------
       - name: Create PR to upstream
         if: steps.diff.outputs.no-changes == 'false' && steps.pr-check.outputs.exists == 'false'
         uses: actions/github-script@v7
@@ -142,20 +251,29 @@ jobs:
           script: |
             const owner = process.env.UPSTREAM_OWNER;
             const repo  = process.env.UPSTREAM_REPO;
+
             const forkOwner = process.env.GITHUB_REPOSITORY_OWNER;
+            const forkRepo  = process.env.GITHUB_REPOSITORY; // downstream full name
 
             const sha = process.env.GITHUB_SHA;
-            const repoFull = process.env.GITHUB_REPOSITORY;
+            const runId = process.env.GITHUB_RUN_ID;
+            const deploymentStatus = '${{ needs.check-deployment.outputs.deployment-status }}';
 
-            const title = `🔄 Sync from downstream (${sha.substring(0,7)})`;
-            const body = `
-            ## 🔄 自动同步更新
+            const title = `🔄 Sync from downstream: ${sha.substring(0,7)}`;
 
-            **来源仓库**: ${repoFull}
-            **提交 SHA**: \`${sha}\`
+            const body = [
+              '## 🔄 自动同步更新',
+              '',
+              '此 PR 由 GitHub Actions 自动创建，用于同步下游仓库的更新。',
+              '',
+              `**来源仓库**: ${forkRepo}`,
+              `**提交**: \`${sha}\``,
+              `**部署状态**: ${deploymentStatus}`,
+              '',
+              `*Run: ${process.env.GITHUB_SERVER_URL}/${forkRepo}/actions/runs/${runId}*`,
+            ].join('\n');
 
-            此 PR 由 GitHub Actions 自动创建。
-            `;
+            console.log(`Creating PR: ${forkOwner}:main -> ${owner}/${repo}:main`);
 
             const { data: pr } = await github.rest.pulls.create({
               owner,
@@ -169,9 +287,14 @@ jobs:
             console.log(`✅ PR created: #${pr.number}`);
             console.log(`🔗 ${pr.html_url}`);
 
-      # ------------------------------------------------------------
-      # 无变更提示
-      # ------------------------------------------------------------
+      - name: Summary
+        if: steps.diff.outputs.no-changes == 'false'
+        run: |
+          echo "📊 Summary"
+          echo "deployment-status: ${{ needs.check-deployment.outputs.deployment-status }}"
+          echo "existing-pr: ${{ steps.pr-check.outputs.exists }}"
+          echo "existing-pr-number/url: ${{ steps.pr-check.outputs.number }} ${{ steps.pr-check.outputs.url }}"
+
       - name: No changes
         if: steps.diff.outputs.no-changes == 'true'
         run: echo "ℹ️ Nothing to sync"
