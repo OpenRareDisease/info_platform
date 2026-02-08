@@ -242,7 +242,7 @@ python main.py --url https://rarediseases.org/news/ --max-articles 1 --verbose
 
 ### 数据更新流程
 
-爬虫运行完成后，需要将代码提交并推送以触发数据导入：
+爬虫运行完成后，需要将代码提交并推送到 GitHub，然后**创建 Pull Request** 才会触发 CI/CD 部署：
 
 ```bash
 # 1. 查看生成的文章文件
@@ -253,20 +253,29 @@ git add server/articles/
 git commit -m "chore: 添加爬取的文章"
 
 # 3. 推送到远程仓库
-git push origin main
+git push origin feat/your-branch-name
+
+# 4. ⚠️ 重要：在 GitHub 上创建 Pull Request
+# 访问 https://github.com/demongodYY/info_platform_fork
+# 点击 "Compare & pull request" 创建 PR
+# 等待 Owner 合并 PR 后才会触发 CI/CD
 ```
 
 **自动导入流程**：
 
-1. 代码推送到 GitHub 后触发 Vercel CI/CD
+1. **创建并合并 PR**：在 [下游仓库](https://github.com/demongodYY/info_platform_fork) 创建 PR，Owner 合并后触发 Vercel CI/CD
 2. Vercel 构建时执行 `prebuild` 脚本（`server/scripts/import-articles.js`）
 3. 脚本扫描 `server/articles/` 目录下**当天**的文章（按年月日匹配）
 4. 只导入 `markdown_professional/` 目录下的专业版文章
 5. 解析文章标题、分类、原文链接等元数据
 6. 通过 Supabase REST API 导入到数据库
-7. 部署成功后，文章会自动出现在网站上
+7. 部署成功后，文章会自动出现在网站上 [www.raredisease.top](https://www.raredisease.top)
 
-> ⚠️ **注意**：只有当天（按年月日）的文章会被导入，确保爬虫在同一天运行并推送代码。
+> ⚠️ **重要提示**：
+>
+> - 只有当天（按年月日）的文章会被导入，确保爬虫在同一天运行并推送代码
+> - **代码推送到 GitHub 后，必须创建 Pull Request 并等待 Owner 合并到 `main` 分支，才会触发 CI/CD 更新线上网站**
+> - **只有在 `main` 分支上 Owner 的 merge 或 push 才会触发 Vercel 自动部署**
 
 详细使用说明请参考 [rare_disease_bot/README.md](./rare_disease_bot/README.md)
 
@@ -286,7 +295,15 @@ git push origin main
 
 ### 3. 部署
 
-Vercel 会自动检测 Nuxt 项目并配置构建命令。每次推送到主分支都会自动部署。
+Vercel 会自动检测 Nuxt 项目并配置构建命令。
+
+> ⚠️ **重要**：只有在 [demongodYY/info_platform_fork](https://github.com/demongodYY/info_platform_fork) 仓库的 `main` 分支上，**Owner 提交的 merge 或 push** 才会触发 Vercel CI/CD 自动部署。
+>
+> 这意味着：
+>
+> - 其他贡献者推送代码到分支不会触发部署
+> - 必须创建 Pull Request 并等待 Owner 合并到 `main` 分支
+> - Owner 直接 push 到 `main` 分支也会触发部署
 
 ### 构建流程
 
@@ -413,17 +430,19 @@ npm run test:coverage
 
 ## 🔄 开发流程
 
-由于 Vercel 免费版限制（只能关联个人 private 仓库），且只有 repo owner 的提交才能触发 CD，本项目采用以下开发流程：
+由于 Vercel 免费版限制（只能关联个人 private 仓库），且**只有在 `main` 分支上 Owner 的 merge 或 push 才能触发 CD**，本项目采用以下开发流程：
 
 ### 流程说明
 
 1. **在[下游仓库](https://github.com/demongodYY/info_platform_fork)开发并提交 PR**
    - 在个人 fork 仓库（当前仓库）创建功能分支进行开发
-   - 创建 Pull Request 提交给仓库 Owner
+   - 将代码推送到 GitHub
+   - **⚠️ 重要：必须创建 Pull Request 提交给仓库 Owner**
 
 2. **Owner 合并触发 CD**
-   - Owner 审查并合并 PR 到主分支
-   - Owner 的提交会触发 Vercel CI/CD 自动部署
+   - Owner 审查并合并 PR 到 `main` 分支
+   - **只有在 `main` 分支上 Owner 的 merge 或 push 才会触发 Vercel CI/CD 自动部署**
+   - Owner 的提交会触发 Vercel CI/CD 自动部署到线上网站 [www.raredisease.top](https://www.raredisease.top)
    - **GitHub Actions 会自动检测部署状态**（最多等待 10 分钟）
 
 3. **自动同步到上游仓库**
@@ -436,7 +455,9 @@ npm run test:coverage
 ### 自动化工作流程
 
 ```
-代码推送到 main 分支（Owner 合并 PR 后）
+Owner 在 main 分支上 merge PR 或直接 push
+    ↓
+Vercel CI/CD 自动触发部署（只有 Owner 的提交）
     ↓
 GitHub Actions 自动触发
     ↓
@@ -460,13 +481,15 @@ git add .
 git commit -m "feat: 添加新功能"
 git push origin feat/new-feature
 
-# 2. 在 GitHub 上创建 PR 给 Owner
+# 2. ⚠️ 重要：在 GitHub 上创建 PR 给 Owner
+# 访问 https://github.com/demongodYY/info_platform_fork
+# 点击 "Compare & pull request" 创建 PR
 # 等待 Owner 审查并合并
 
-# 3. Owner 合并后，GitHub Actions 会自动：
-#    - 等待 Vercel 部署完成
-#    - 检查变更
-#    - 自动向上游仓库创建 PR
+# 3. Owner 合并后，会自动触发：
+#    - Vercel CI/CD 自动部署到线上网站
+#    - GitHub Actions 自动检测部署状态
+#    - 检查变更并自动向上游仓库创建 PR
 #    无需手动操作！🎉
 ```
 

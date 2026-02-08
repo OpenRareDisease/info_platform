@@ -208,8 +208,16 @@ git push origin feat/your-feature-name
 
 ### 4. 创建 Pull Request
 
-1. 访问你的 fork 仓库：`https://github.com/YOUR_USERNAME/info_platform`
-2. 点击 "Compare & pull request"
+> ⚠️ **重要提示**：代码提交并推送到 GitHub 后，**必须创建 Pull Request 并等待 Owner 合并**。
+>
+> **触发部署的条件**：
+>
+> - 只有在 [demongodYY/info_platform_fork](https://github.com/demongodYY/info_platform_fork) 仓库的 `main` 分支上
+> - **Owner 提交的 merge 或 push** 才会触发 Vercel CI/CD 自动部署
+> - 其他贡献者的提交不会触发部署
+
+1. 访问 [下游仓库](https://github.com/demongodYY/info_platform_fork)
+2. 点击 "Compare & pull request" 按钮
 3. 填写 PR 描述：
    - **标题**：清晰描述你的更改
    - **描述**：
@@ -218,12 +226,14 @@ git push origin feat/your-feature-name
      - 相关 Issue（如果有）
      - 截图（如果是 UI 更改）
 4. 点击 "Create pull request"
+5. **等待 Owner 审查并合并**：只有 Owner 合并 PR 后，才会触发 Vercel CI/CD 自动部署到线上网站
 
 ### 5. PR 审查流程
 
-- Maintainer 会审查你的 PR
+- Owner 会审查你的 PR
 - 可能需要根据反馈进行修改
-- 审查通过后，PR 会被合并
+- 审查通过后，Owner 会将 PR 合并到 `main` 分支
+- **只有在 `main` 分支上 Owner 的 merge 或 push 才会触发 Vercel CI/CD**，将更新部署到线上网站 [www.raredisease.top](https://www.raredisease.top)
 
 ## 🏗️ 项目结构
 
@@ -327,9 +337,31 @@ A: 你可以：
 
 A:
 
-- 等待 maintainer 审查
+- 等待 Owner 审查
 - 根据反馈进行修改
 - 保持 PR 分支与上游 main 分支同步
+- **等待 Owner 合并 PR**：只有 PR 被合并到主分支后，才会触发 Vercel CI/CD 自动部署到线上网站
+
+### Q: 为什么我推送了代码但网站没有更新？
+
+A:
+
+**重要**：代码推送到 GitHub 后，**必须创建 Pull Request 并等待 Owner 合并到 `main` 分支**，才会触发 CI/CD 部署。
+
+**触发部署的条件**：
+
+- 只有在 [demongodYY/info_platform_fork](https://github.com/demongodYY/info_platform_fork) 仓库的 `main` 分支上
+- **Owner 提交的 merge 或 push** 才会触发 Vercel CI/CD 自动部署
+- 其他贡献者的提交不会触发部署
+
+流程如下：
+
+1. 推送代码到 GitHub 分支
+2. 在 [下游仓库](https://github.com/demongodYY/info_platform_fork) 创建 Pull Request
+3. 等待 Owner 审查并合并 PR 到 `main` 分支
+4. Owner 的 merge 或 push 到 `main` 分支后自动触发 Vercel CI/CD 部署到 [www.raredisease.top](https://www.raredisease.top)
+
+这是 Vercel 免费版的限制：只有 repo owner 在 `main` 分支上的提交才会触发部署。
 
 ### Q: 如何报告 Bug？
 
