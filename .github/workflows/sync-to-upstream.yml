@@ -186,13 +186,14 @@ jobs:
         if: steps.check-changes.outputs.no-changes == 'false' && steps.check-prs.outputs.has-open-pr == 'false'
         id: check-pat
         run: |
-          if [ -z "${{ secrets.PAT }}" ]; then
-            echo "❌ PAT secret is not configured!"
+          # 检查 PAT 是否存在且不为空
+          if [ -z "${{ secrets.PAT }}" ] || [ "${{ secrets.PAT }}" = "" ]; then
+            echo "❌ PAT secret is not configured or is empty!"
             echo ""
             echo "Please configure PAT secret:"
             echo "1. Go to: https://github.com/${{ github.repository }}/settings/secrets/actions"
             echo "2. Click 'New repository secret'"
-            echo "3. Name: PAT"
+            echo "3. Name: PAT (must be exactly 'PAT', case-sensitive)"
             echo "4. Value: Your Personal Access Token with 'public_repo' scope"
             echo "5. Click 'Add secret'"
             echo ""
@@ -201,10 +202,19 @@ jobs:
             echo "2. Click 'Generate new token (classic)'"
             echo "3. Select 'public_repo' scope"
             echo "4. Generate and copy the token"
+            echo ""
+            echo "Note: After adding the secret, you may need to wait a few seconds for it to be available."
             exit 1
           else
-            echo "✅ PAT secret is configured"
+            # 检查 PAT 长度（GitHub PAT 通常是 40+ 字符）
+            PAT_LENGTH=${#PAT}
+            echo "✅ PAT secret is configured (length: $PAT_LENGTH characters)"
+            if [ "$PAT_LENGTH" -lt 20 ]; then
+              echo "⚠️ Warning: PAT seems too short. Please verify it's correct."
+            fi
           fi
+        env:
+          PAT: ${{ secrets.PAT }}
 
       - name: Create Pull Request using GitHub API
         if: steps.check-changes.outputs.no-changes == 'false' && steps.check-prs.outputs.has-open-pr == 'false' && steps.check-pat.outcome == 'success'
@@ -214,11 +224,32 @@ jobs:
           # 必须使用 PAT，GITHUB_TOKEN 无法跨仓库创建 PR
           github-token: ${{ secrets.PAT }}
           script: |
-            // 再次检查 PAT（双重保险）
-            if (!process.env.GITHUB_TOKEN || process.env.GITHUB_TOKEN === '') {
-              core.setFailed('❌ PAT secret is required to create PR to upstream repository. Please configure PAT secret in repository settings.');
+            // 检查 GITHUB_TOKEN（由 github-token 参数传入）
+            const token = process.env.GITHUB_TOKEN;
+            console.log('Token length:', token ? token.length : 0);
+            
+            if (!token || token === '' || token.length < 20) {
+              const errorMsg = [
+                '❌ PAT secret is required to create PR to upstream repository.',
+                '',
+                'Possible issues:',
+                '1. PAT secret is not configured in repository settings',
+                '2. PAT secret name is incorrect (must be exactly "PAT")',
+                '3. PAT secret value is empty',
+                '4. Workflow was triggered from a fork PR (secrets are not available)',
+                '',
+                'Please check:',
+                '- Repository: https://github.com/' + process.env.GITHUB_REPOSITORY + '/settings/secrets/actions',
+                '- Ensure secret name is exactly "PAT" (case-sensitive)',
+                '- Ensure secret value is a valid GitHub Personal Access Token',
+                '- If triggered by PR from fork, secrets are not available - trigger from main branch push instead'
+              ].join('\n');
+              
+              core.setFailed(errorMsg);
               return;
             }
+            
+            console.log('✅ PAT token is available');
             
             const commitMessage = ${{ toJSON(github.event.head_commit.message) }};
             const commitAuthor = ${{ toJSON(github.event.head_commit.author.name) }};
