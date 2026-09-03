@@ -1,5 +1,18 @@
-import type { AuthoritySourceType, SearchQueryAnalysis, SearchQueryIntent } from '~/types/search'
+import {
+  AUTHORITY_SOURCE_TYPES,
+  SEARCH_QUERY_INTENTS,
+  type AuthoritySourceType,
+  type SearchQueryAnalysis,
+  type SearchQueryIntent,
+} from '~/types/search'
+import {
+  findExplicitDiseaseProfile,
+  usesClinicalGuidanceForTreatmentQuery,
+} from './disease-profiles'
 import { getSubjectAliases, normalizeSearchQuery } from './query-normalization'
+
+const RECENCY_PATTERN =
+  /最新|进展|近期|更新|研究动态|recent|latest|\bnew\b|\bupdate\b|\bprogress\b/i
 
 export async function analyzeSearchQuery(query: string): Promise<SearchQueryAnalysis> {
   const apiKey = process.env.OPENAI_API_KEY
@@ -30,8 +43,8 @@ export async function analyzeSearchQuery(query: string): Promise<SearchQueryAnal
             role: 'user',
             content: `Query: ${query}
 
-Supported intents: disease_overview, treatment_update, clinical_trial, drug_approval, policy_access, patient_support, research_progress.
-Supported source types: disease_reference, treatment_update, clinical_trial, drug_approval, policy_access, patient_org, research_publication.
+Supported intents: disease_overview, clinical_guidance, treatment_update, clinical_trial, drug_approval, policy_access, patient_support, research_progress.
+Supported source types: disease_reference, clinical_guideline, treatment_update, clinical_trial, drug_approval, policy_access, patient_org, research_publication.
 Return only compact JSON.`,
           },
         ],
@@ -62,7 +75,7 @@ export function fallbackAnalyzeSearchQuery(query: string): SearchQueryAnalysis {
   const lowered = query.toLowerCase()
   const subject = normalized.resolvedSubject || query.trim()
   const intent = inferIntent(lowered)
-  const timeSensitivity = /最新|进展|近期|recent|latest|new/.test(lowered) ? 'high' : 'medium'
+  const timeSensitivity = hasExplicitRecency(lowered) ? 'high' : 'medium'
 
   return {
     subject,
@@ -82,38 +95,79 @@ function extractJsonObject(content: string) {
 
 function normalizeAnalysis(value: Record<string, unknown>, query: string): SearchQueryAnalysis {
   const fallback = fallbackAnalyzeSearchQuery(query)
-  const intent = asIntent(value.intent) || fallback.intent
+  const normalizedQuery = normalizeSearchQuery(query)
+  const modelSubject = asString(value.subject)
+  const modelAliases = asStringArray(value.aliases)
+  const hasExplicitSubject = Boolean(normalizedQuery.resolvedSubject)
+  const modelClaimsRegisteredDisease = Boolean(findExplicitDiseaseProfile(modelSubject))
+  const explicitIntent = inferExplicitIntent(query.toLowerCase())
+  const subject = hasExplicitSubject
+    ? normalizedQuery.resolvedSubject
+    : modelClaimsRegisteredDisease
+      ? fallback.subject
+      : modelSubject || fallback.subject
+  const intent = explicitIntent || asIntent(value.intent) || fallback.intent
+
   return {
-    subject: asString(value.subject) || fallback.subject,
-    aliases: asStringArray(value.aliases).length ? asStringArray(value.aliases) : fallback.aliases,
+    subject,
+    aliases: hasExplicitSubject
+      ? getSubjectAliases(subject)
+      : modelClaimsRegisteredDisease
+        ? fallback.aliases
+        : modelAliases.length
+          ? modelAliases.filter(alias => !findExplicitDiseaseProfile(alias))
+          : fallback.aliases,
     intent,
-    timeSensitivity: asTimeSensitivity(value.timeSensitivity) || fallback.timeSensitivity,
-    preferredSourceTypes: normalizeSourceTypes(
-      value.preferredSourceTypes,
-      preferredSourceTypesForIntent(intent)
-    ),
-    deprioritizedSourceTypes: normalizeSourceTypes(
-      value.deprioritizedSourceTypes,
-      deprioritizedSourceTypesForIntent(intent)
-    ),
-    queryTerms: asStringArray(value.queryTerms).length
-      ? asStringArray(value.queryTerms)
-      : fallback.queryTerms,
+    timeSensitivity: hasExplicitRecency(query)
+      ? 'high'
+      : asTimeSensitivity(value.timeSensitivity) || fallback.timeSensitivity,
+    preferredSourceTypes: explicitIntent
+      ? preferredSourceTypesForIntent(intent)
+      : normalizeSourceTypes(value.preferredSourceTypes, preferredSourceTypesForIntent(intent)),
+    deprioritizedSourceTypes: explicitIntent
+      ? deprioritizedSourceTypesForIntent(intent)
+      : normalizeSourceTypes(
+          value.deprioritizedSourceTypes,
+          deprioritizedSourceTypesForIntent(intent)
+        ),
+    queryTerms: buildQueryTerms(subject, query, intent),
   }
 }
 
 function inferIntent(query: string): SearchQueryIntent {
+  return inferExplicitIntent(query) || 'disease_overview'
+}
+
+function inferExplicitIntent(query: string): SearchQueryIntent | null {
+  if (hasExplicitRecency(query)) return 'treatment_update'
   if (/trial|临床试验|nct|招募/.test(query)) return 'clinical_trial'
   if (/approval|审批|获批|上市|fda|ema|nmpa/.test(query)) return 'drug_approval'
   if (/医保|报销|援助|政策|准入/.test(query)) return 'policy_access'
-  if (/患者组织|基金会|协会|support|help/.test(query)) return 'patient_support'
+  if (/患者支持|患者组织|基金会|协会|support|help/.test(query)) return 'patient_support'
   if (/研究|机制|论文|文献|biomarker|gene/.test(query)) return 'research_progress'
-  if (/治疗|进展|最新|update|progress|therapy/.test(query)) return 'treatment_update'
-  return 'disease_overview'
+  if (/指南|怎么治疗|如何治疗|治疗指南|guideline|clinical guidance/.test(query)) {
+    return 'clinical_guidance'
+  }
+  if (
+    usesClinicalGuidanceForTreatmentQuery(normalizeSearchQuery(query).resolvedSubject) &&
+    /用药|治疗|\b(?:treatment|therapy|medications?)\b|\brecommended\s+(?:medications?|drugs?)\b|\bhow\s+to\s+treat\b/.test(
+      query
+    )
+  ) {
+    return 'clinical_guidance'
+  }
+  if (/治疗|\btreatment\b|therapy/.test(query)) return 'treatment_update'
+  return null
+}
+
+function hasExplicitRecency(query: string) {
+  return RECENCY_PATTERN.test(query)
 }
 
 function preferredSourceTypesForIntent(intent: SearchQueryIntent): AuthoritySourceType[] {
   switch (intent) {
+    case 'clinical_guidance':
+      return ['clinical_guideline', 'disease_reference']
     case 'treatment_update':
       return ['treatment_update', 'clinical_trial', 'drug_approval', 'patient_org']
     case 'clinical_trial':
@@ -142,6 +196,10 @@ function deprioritizedSourceTypesForIntent(intent: SearchQueryIntent): Authority
 function buildQueryTerms(subject: string, query: string, intent: SearchQueryIntent) {
   const terms = new Set<string>([subject, query.trim()].filter(Boolean))
   switch (intent) {
+    case 'clinical_guidance':
+      terms.add('guideline')
+      terms.add('clinical guidance')
+      break
     case 'treatment_update':
       terms.add('treatment')
       terms.add('update')
@@ -194,25 +252,9 @@ function asStringArray(value: unknown) {
 }
 
 function isIntent(value: string): value is SearchQueryIntent {
-  return [
-    'disease_overview',
-    'treatment_update',
-    'clinical_trial',
-    'drug_approval',
-    'policy_access',
-    'patient_support',
-    'research_progress',
-  ].includes(value)
+  return (SEARCH_QUERY_INTENTS as readonly string[]).includes(value)
 }
 
 function isAuthoritySourceType(value: string): value is AuthoritySourceType {
-  return [
-    'disease_reference',
-    'treatment_update',
-    'clinical_trial',
-    'drug_approval',
-    'policy_access',
-    'patient_org',
-    'research_publication',
-  ].includes(value)
+  return (AUTHORITY_SOURCE_TYPES as readonly string[]).includes(value)
 }

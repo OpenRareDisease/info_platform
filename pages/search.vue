@@ -10,12 +10,16 @@
         @example="handleExampleClick"
       />
     </div>
-    <div v-if="status === 'loading'" class="search-page__section">
+    <div v-if="status === 'loading' && !sources.length" class="search-page__section">
       <TraceSteps :trace="trace" :loading="true" />
     </div>
-    <div v-if="status === 'done' && result" class="search-page__section">
-      <SourceList :sources="result.sources" />
-      <AiAnswer :answer="result.answer || ''" />
+    <div v-if="displaySources.length || displayAnswer" class="search-page__section">
+      <SourceList :sources="displaySources" />
+      <AiAnswer
+        :answer="displayAnswer"
+        :streaming="status === 'loading'"
+        :initially-expanded="result?.messageStatus === 'safety_routed'"
+      />
     </div>
     <section v-if="status === 'error'" class="search-page__section search-page__section--error">
       <p class="search-page__error-msg">{{ errorMessage }}</p>
@@ -25,7 +29,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useSearch } from '~/composables/useSearch'
 import SearchBar from '~/components/search/SearchBar.vue'
 import TraceSteps from '~/components/search/TraceSteps.vue'
@@ -34,7 +38,11 @@ import AiAnswer from '~/components/search/AiAnswer.vue'
 
 const draft = ref('')
 
-const { query, status, trace, result, errorMessage, search, reset } = useSearch()
+const { query, status, trace, sources, result, streamedAnswer, errorMessage, search, reset } =
+  useSearch()
+
+const displaySources = computed(() => result.value?.sources || sources.value)
+const displayAnswer = computed(() => result.value?.answer || streamedAnswer.value)
 
 const searchExamples = ['FSHD最新治疗进展', '罕见病临床试验', '药物审批状态', '庞贝病基因治疗']
 

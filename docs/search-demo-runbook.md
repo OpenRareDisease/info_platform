@@ -17,6 +17,7 @@ OPENAI_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
 OPENAI_API_KEY=your_api_key
 MODEL_NAME=qwen-max
 BRAVE_API_KEY=your_brave_api_key
+ENABLE_INTERNAL_KNOWLEDGE_BASE=false
 ```
 
 字段说明：

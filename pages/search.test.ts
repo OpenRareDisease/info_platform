@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'
 import SearchPage from './search.vue'
+import type { SearchSource } from '~/types/search'
 
 // ── Mock useSearch composable ─────────────────────────────────────────────
 const mockSearch = vi.fn()
@@ -10,7 +11,9 @@ const mockReset = vi.fn()
 const mockQuery = ref('')
 const mockStatus = ref<'idle' | 'loading' | 'done' | 'error'>('idle')
 const mockTrace = ref<any[]>([])
+const mockSources = ref<SearchSource[]>([])
 const mockResult = ref<any>(null)
+const mockStreamedAnswer = ref('')
 const mockErrorMessage = ref('')
 
 vi.mock('~/composables/useSearch', () => ({
@@ -18,7 +21,9 @@ vi.mock('~/composables/useSearch', () => ({
     query: mockQuery,
     status: mockStatus,
     trace: mockTrace,
+    sources: mockSources,
     result: mockResult,
+    streamedAnswer: mockStreamedAnswer,
     errorMessage: mockErrorMessage,
     search: mockSearch,
     reset: mockReset,
@@ -29,7 +34,9 @@ function resetMocks() {
   mockQuery.value = ''
   mockStatus.value = 'idle'
   mockTrace.value = []
+  mockSources.value = []
   mockResult.value = null
+  mockStreamedAnswer.value = ''
   mockErrorMessage.value = ''
   mockSearch.mockReset()
   mockReset.mockReset()
@@ -170,6 +177,44 @@ describe('search.vue', () => {
     expect(steps[1].classes()).toContain('trace-steps__item--active')
   })
 
+  it('shows sources as soon as retrieval finishes while the final result is pending', async () => {
+    mockStatus.value = 'loading'
+    mockSources.value = sampleResult.sources
+
+    const wrapper = mount(SearchPage)
+    await flushPromises()
+
+    expect(wrapper.findAll('.source-card')).toHaveLength(2)
+    expect(wrapper.text()).toContain('信息来源')
+    expect(wrapper.find('.trace-steps').exists()).toBe(false)
+    expect(wrapper.find('.ai-answer__trigger').exists()).toBe(true)
+  })
+
+  it('keeps a streaming AI answer collapsed until requested and open after completion', async () => {
+    mockStatus.value = 'loading'
+    mockSources.value = sampleResult.sources
+    mockStreamedAnswer.value = '正在生成的第一段回答'
+
+    const wrapper = mount(SearchPage)
+    await flushPromises()
+
+    expect(wrapper.find('.ai-answer__body').exists()).toBe(false)
+    await wrapper.find('.ai-answer__trigger').trigger('click')
+
+    expect(wrapper.find('.ai-answer__body').exists()).toBe(true)
+    expect(wrapper.text()).toContain('AI 正在整理')
+    expect(wrapper.text()).toContain('正在生成的第一段回答')
+    expect(wrapper.find('.ai-answer__trigger').exists()).toBe(false)
+
+    mockStatus.value = 'done'
+    mockResult.value = sampleResult
+    await flushPromises()
+
+    expect(wrapper.find('.ai-answer__body').exists()).toBe(true)
+    expect(wrapper.text()).toContain('AI 解读')
+    expect(wrapper.text()).toContain('第一段解读内容')
+  })
+
   it('hides heading and examples during loading', async () => {
     mockStatus.value = 'loading'
     const wrapper = mount(SearchPage)
@@ -284,6 +329,23 @@ describe('search.vue', () => {
 
     expect(wrapper.find('.source-list').exists()).toBe(false)
     expect(wrapper.find('.ai-answer__trigger').exists()).toBe(false)
+  })
+
+  it('shows a safety-routed answer even when there are no sources', async () => {
+    mockStatus.value = 'done'
+    mockResult.value = {
+      ...sampleResult,
+      sources: [],
+      answer: '请立即联系当地急救服务或可信赖的人陪伴你。',
+      messageStatus: 'safety_routed',
+    }
+
+    const wrapper = mount(SearchPage)
+    await flushPromises()
+
+    expect(wrapper.find('.source-list').exists()).toBe(false)
+    expect(wrapper.find('.ai-answer__body').exists()).toBe(true)
+    expect(wrapper.text()).toContain('请立即联系当地急救服务或可信赖的人陪伴你。')
   })
 
   // ── Error state ─────────────────────────────────────────────────────

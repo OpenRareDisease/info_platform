@@ -1,15 +1,10 @@
-const SUBJECT_ALIAS_MAP = [
-  {
-    canonical: 'FSHD',
-    aliases: [
-      'FSHD',
-      'facioscapulohumeral muscular dystrophy',
-      'facioscapulohumeral dystrophy',
-      '面肩肱型肌营养不良',
-      '面肩肱肌营养不良',
-    ],
-  },
-]
+import {
+  containsExplicitDiseaseAlias,
+  findExplicitDiseaseProfile,
+  listDiseaseAliases,
+} from './disease-profiles'
+
+export { containsExplicitDiseaseAlias }
 
 export function normalizeSearchQuery(query: string) {
   const trimmed = query.trim()
@@ -23,23 +18,13 @@ export function normalizeSearchQuery(query: string) {
 }
 
 export function getSubjectAliases(subject: string) {
-  const normalized = subject.trim().toLowerCase()
-  const entry = SUBJECT_ALIAS_MAP.find(
-    item =>
-      item.canonical.toLowerCase() === normalized ||
-      item.aliases.some(alias => alias.toLowerCase() === normalized)
-  )
+  return listDiseaseAliases(subject)
+}
 
-  return entry ? [...entry.aliases] : subject.trim() ? [subject.trim()] : []
+export function matchExplicitDiseaseSubject(message: string) {
+  return findExplicitDiseaseProfile(message)?.canonical || ''
 }
 
 function findSubject(message: string) {
-  const lowered = message.toLowerCase()
-  for (const entry of SUBJECT_ALIAS_MAP) {
-    if (entry.aliases.some(alias => lowered.includes(alias.toLowerCase()))) {
-      return entry.canonical
-    }
-  }
-
-  return ''
+  return matchExplicitDiseaseSubject(message)
 }

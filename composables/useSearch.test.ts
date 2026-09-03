@@ -56,13 +56,70 @@ describe('useSearch', () => {
   })
 
   it('初始状态正确', () => {
-    const { query, status, trace, result, errorMessage } = useSearch()
+    const { query, status, trace, sources, result, streamedAnswer, errorMessage } = useSearch()
 
     expect(query.value).toBe('')
     expect(status.value).toBe('idle')
     expect(trace.value).toEqual([])
+    expect(sources.value).toEqual([])
     expect(result.value).toBeNull()
+    expect(streamedAnswer.value).toBe('')
     expect(errorMessage.value).toBe('')
+  })
+
+  it('收到 sources_ready 时在最终结果前提供来源', async () => {
+    const encoder = new TextEncoder()
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller
+      },
+    })
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, body } as Response)
+
+    const { status, sources, result, search } = useSearch()
+    const searchPromise = search('测试')
+
+    await vi.waitFor(() => expect(streamController).toBeDefined())
+    streamController?.enqueue(
+      encoder.encode(`${JSON.stringify({ type: 'sources_ready', sources: resultEvent.sources })}\n`)
+    )
+
+    await vi.waitFor(() => expect(sources.value).toEqual(resultEvent.sources))
+    expect(status.value).toBe('loading')
+    expect(result.value).toBeNull()
+
+    streamController?.enqueue(
+      encoder.encode(`${JSON.stringify({ type: 'result', result: resultEvent })}\n`)
+    )
+    streamController?.close()
+    await searchPromise
+  })
+
+  it('收到答案增量时立即更新 streamedAnswer', async () => {
+    const encoder = new TextEncoder()
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller
+      },
+    })
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, body } as Response)
+
+    const { streamedAnswer, search } = useSearch()
+    const searchPromise = search('测试')
+
+    await vi.waitFor(() => expect(streamController).toBeDefined())
+    streamController?.enqueue(
+      encoder.encode(`${JSON.stringify({ type: 'answer_delta', delta: '正在生成第一段' })}\n`)
+    )
+    await vi.waitFor(() => expect(streamedAnswer.value).toBe('正在生成第一段'))
+
+    streamController?.enqueue(
+      encoder.encode(`${JSON.stringify({ type: 'result', result: resultEvent })}\n`)
+    )
+    streamController?.close()
+    await searchPromise
   })
 
   it('搜索时状态切换到 loading', async () => {
@@ -155,7 +212,8 @@ describe('useSearch', () => {
     const events = [JSON.stringify({ type: 'result', result: resultEvent })]
     globalThis.fetch = mockFetchStream(events)
 
-    const { query, status, trace, result, errorMessage, search, reset } = useSearch()
+    const { query, status, trace, sources, result, streamedAnswer, errorMessage, search, reset } =
+      useSearch()
 
     await search('测试')
     expect(status.value).toBe('done')
@@ -164,8 +222,42 @@ describe('useSearch', () => {
     expect(query.value).toBe('')
     expect(status.value).toBe('idle')
     expect(trace.value).toEqual([])
+    expect(sources.value).toEqual([])
     expect(result.value).toBeNull()
+    expect(streamedAnswer.value).toBe('')
     expect(errorMessage.value).toBe('')
+  })
+
+  it('reset 后取消并忽略仍在返回的旧搜索', async () => {
+    const encoder = new TextEncoder()
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined
+    let requestSignal: AbortSignal | undefined
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller
+      },
+    })
+    globalThis.fetch = vi.fn().mockImplementation((_url, init) => {
+      requestSignal = init?.signal
+      return Promise.resolve({ ok: true, status: 200, body } as Response)
+    })
+
+    const { status, sources, result, streamedAnswer, search, reset } = useSearch()
+    const searchPromise = search('旧搜索')
+    await vi.waitFor(() => expect(streamController).toBeDefined())
+    reset()
+
+    expect(requestSignal?.aborted).toBe(true)
+    streamController?.enqueue(
+      encoder.encode(`${JSON.stringify({ type: 'answer_delta', delta: '旧回答' })}\n`)
+    )
+    streamController?.close()
+    await searchPromise
+
+    expect(status.value).toBe('idle')
+    expect(sources.value).toEqual([])
+    expect(result.value).toBeNull()
+    expect(streamedAnswer.value).toBe('')
   })
 
   it('query ref 更新为搜索词', async () => {

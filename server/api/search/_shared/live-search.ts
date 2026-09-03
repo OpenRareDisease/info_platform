@@ -1,5 +1,7 @@
-import type { SearchQueryAnalysis, SourceRegistryEntry } from '~/types/search'
+import type { AuthoritySourceType, SearchQueryAnalysis, SourceRegistryEntry } from '~/types/search'
 import type { RetrievedEvidenceItem } from './retrieval'
+import { detectSpecialistTopic, findTrustedAuthoritySource } from './authority-policy'
+import { getAuthoritySourceTypesForIntent } from './disease-profiles'
 
 export async function searchWhitelistedSources(
   query: string,
@@ -12,9 +14,12 @@ export async function searchWhitelistedSources(
   const braveApiKey = process.env.BRAVE_API_KEY
   if (!braveApiKey) return []
 
-  const prioritizedSources = selectSourcesForQuery(registry, analysis)
+  const specialistTopic = detectSpecialistTopic(trimmedQuery)
+  const prioritizedSources = selectSourcesForQuery(registry, analysis, specialistTopic)
   const results = await Promise.allSettled(
-    prioritizedSources.map(source => searchWithBrave(trimmedQuery, source, braveApiKey, analysis))
+    prioritizedSources.map(source =>
+      searchWithBrave(trimmedQuery, source, braveApiKey, analysis, specialistTopic)
+    )
   )
 
   return dedupeEvidenceItems(flattenSettledResults(results))
@@ -22,7 +27,8 @@ export async function searchWhitelistedSources(
 
 export async function searchInternetSupplementSources(
   query: string,
-  registry: SourceRegistryEntry[]
+  registry: SourceRegistryEntry[],
+  analysis?: SearchQueryAnalysis
 ): Promise<RetrievedEvidenceItem[]> {
   const trimmedQuery = query.trim()
   if (!trimmedQuery) return []
@@ -31,7 +37,7 @@ export async function searchInternetSupplementSources(
   const braveApiKey = process.env.BRAVE_API_KEY
 
   if (braveApiKey) {
-    return searchInternetWithBrave(trimmedQuery, blockedDomains, braveApiKey)
+    return searchInternetWithBrave(trimmedQuery, blockedDomains, braveApiKey, analysis)
   }
 
   return []
@@ -41,12 +47,17 @@ async function searchWithBrave(
   query: string,
   source: SourceRegistryEntry,
   braveApiKey: string,
-  analysis?: SearchQueryAnalysis
+  analysis?: SearchQueryAnalysis,
+  specialistTopic?: string | null
 ): Promise<RetrievedEvidenceItem[]> {
+  const authorityQuery = buildAuthorityQuery(source, query, analysis, specialistTopic)
+  if (!authorityQuery) return []
+
   const searchQuery = new URLSearchParams({
-    q: buildAuthorityQuery(source, query, analysis),
+    q: authorityQuery,
     count: '5',
   })
+  if (analysis?.timeSensitivity === 'high') searchQuery.set('freshness', 'py')
 
   const response = await fetch(
     `https://api.search.brave.com/res/v1/web/search?${searchQuery.toString()}`,
@@ -63,18 +74,20 @@ async function searchWithBrave(
   }
 
   const payload = (await response.json()) as BraveSearchResponse
-  return parseBraveResults(payload, source, analysis)
+  return parseBraveResults(payload, source, query, analysis, specialistTopic)
 }
 
 async function searchInternetWithBrave(
   query: string,
   blockedDomains: Set<string>,
-  braveApiKey: string
+  braveApiKey: string,
+  analysis?: SearchQueryAnalysis
 ): Promise<RetrievedEvidenceItem[]> {
   const searchQuery = new URLSearchParams({
     q: query,
     count: '6',
   })
+  if (analysis?.timeSensitivity === 'high') searchQuery.set('freshness', 'py')
 
   const response = await fetch(
     `https://api.search.brave.com/res/v1/web/search?${searchQuery.toString()}`,
@@ -100,6 +113,8 @@ interface BraveSearchResponse {
       title?: string
       url?: string
       description?: string
+      page_age?: string
+      age?: string
     }>
   }
   news?: {
@@ -107,32 +122,52 @@ interface BraveSearchResponse {
       title?: string
       url?: string
       description?: string
+      page_age?: string
+      age?: string
     }>
   }
 }
 
 function parseBraveResults(
   payload: BraveSearchResponse,
-  source: Pick<SourceRegistryEntry, 'name' | 'domain' | 'sourceType' | 'url'>,
-  analysis?: SearchQueryAnalysis
+  source: SourceRegistryEntry,
+  rawQuery: string,
+  analysis?: SearchQueryAnalysis,
+  specialistTopic?: string | null
 ): RetrievedEvidenceItem[] {
   const items: RetrievedEvidenceItem[] = []
+  const trustedSpecialistDomain = specialistTopic ? getTrustedSourceHostname(source) : null
+  if (specialistTopic && !trustedSpecialistDomain) return items
+
   const rankedResults = [...(payload.web?.results || []), ...(payload.news?.results || [])].sort(
     (a, b) => scoreResultForAnalysis(b, analysis) - scoreResultForAnalysis(a, analysis)
   )
   for (const result of rankedResults) {
     const url = result.url || ''
-    if (!isMatchingSourceUrl(url, source)) continue
-    if (!isRelevantAuthorityResult(result, analysis)) continue
+    if (specialistTopic) {
+      const trustedSource = findTrustedAuthoritySource({
+        rawQuery,
+        result: {
+          url,
+          title: result.title,
+          summary: result.description,
+        },
+        sources: [source],
+      })
+      if (!trustedSource) continue
+    } else {
+      if (!isMatchingSourceUrl(url, source)) continue
+      if (!isRelevantAuthorityResult(result, analysis)) continue
+    }
 
     items.push({
       sourceType: source.sourceType,
       sourceTier: 'authority',
       sourceLabel: source.name,
       sourceUrl: url,
-      sourceDomain: source.domain,
+      sourceDomain: trustedSpecialistDomain || source.domain,
       snippet: (result.description || '').trim(),
-      publishedAt: null,
+      publishedAt: normalizePublishedAt(result.page_age) || normalizePublishedAt(result.age),
       title: (result.title || '').trim(),
       content: (result.description || '').trim(),
     })
@@ -158,13 +193,19 @@ function parseInternetBraveResults(
       sourceUrl: url,
       sourceDomain: domain,
       snippet: (result.description || '').trim(),
-      publishedAt: null,
+      publishedAt: normalizePublishedAt(result.page_age) || normalizePublishedAt(result.age),
       title: (result.title || domain).trim(),
       content: (result.description || '').trim(),
     })
   }
 
   return items
+}
+
+function normalizePublishedAt(value: string | undefined) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}/.test(value)) return null
+  const timestamp = Date.parse(value)
+  return Number.isNaN(timestamp) ? null : new Date(timestamp).toISOString()
 }
 
 function dedupeEvidenceItems(items: RetrievedEvidenceItem[]) {
@@ -181,13 +222,36 @@ function flattenSettledResults(results: PromiseSettledResult<RetrievedEvidenceIt
   return results.flatMap(result => (result.status === 'fulfilled' ? result.value : []))
 }
 
-function selectSourcesForQuery(registry: SourceRegistryEntry[], analysis?: SearchQueryAnalysis) {
+function selectSourcesForQuery(
+  registry: SourceRegistryEntry[],
+  analysis?: SearchQueryAnalysis,
+  specialistTopic?: string | null
+) {
+  if (specialistTopic) {
+    const sourceTypes = specialistSourceTypesForIntent(analysis?.intent, specialistTopic)
+    return registry
+      .filter(
+        source =>
+          source.enabled &&
+          source.authorityEligible &&
+          getTrustedSourceHostname(source) !== null &&
+          source.topics.some(topic => sameTopic(topic, specialistTopic)) &&
+          source.sourceTypes.some(type => sourceTypes.includes(type))
+      )
+      .sort((a, b) => a.priority - b.priority)
+  }
+
+  const genericRegistry = registry.filter(
+    source => !source.authorityEligible || source.topics.length === 0
+  )
   const buckets = buildSourceBuckets(analysis)
   const selected = new Map<string, SourceRegistryEntry>()
 
   for (const bucket of buckets) {
     for (const source of sortSourcesForAnalysis(
-      registry.filter(entry => entry.sourceTypes.some(type => bucket.sourceTypes.includes(type))),
+      genericRegistry.filter(entry =>
+        entry.sourceTypes.some(type => bucket.sourceTypes.includes(type))
+      ),
       analysis
     )) {
       const sourceKey = buildSourceSelectionKey(source)
@@ -205,7 +269,7 @@ function selectSourcesForQuery(registry: SourceRegistryEntry[], analysis?: Searc
 
   const allowsBackfill = !analysis || analysis.intent === 'disease_overview'
   if (allowsBackfill) {
-    for (const source of [...registry].sort((a, b) => a.priority - b.priority)) {
+    for (const source of [...genericRegistry].sort((a, b) => a.priority - b.priority)) {
       const sourceKey = buildSourceSelectionKey(source)
       if (selected.has(sourceKey)) continue
       selected.set(sourceKey, source)
@@ -214,6 +278,17 @@ function selectSourcesForQuery(registry: SourceRegistryEntry[], analysis?: Searc
   }
 
   return [...selected.values()]
+}
+
+function specialistSourceTypesForIntent(
+  intent?: SearchQueryAnalysis['intent'],
+  specialistTopic?: string | null
+): AuthoritySourceType[] {
+  return getAuthoritySourceTypesForIntent(specialistTopic, intent)
+}
+
+function sameTopic(left: string, right: string) {
+  return left.trim().toLowerCase() === right.trim().toLowerCase()
 }
 
 function sortSourcesForAnalysis(registry: SourceRegistryEntry[], analysis?: SearchQueryAnalysis) {
@@ -283,11 +358,73 @@ function isMatchingSourceUrl(
 function buildAuthorityQuery(
   source: SourceRegistryEntry,
   query: string,
-  analysis?: SearchQueryAnalysis
+  analysis?: SearchQueryAnalysis,
+  specialistTopic?: string | null
 ) {
+  if (specialistTopic) {
+    const trustedHostname = getTrustedSourceHostname(source)
+    if (!trustedHostname) return null
+
+    const specialistTerms = buildSpecialistQueryTerms(source, query, specialistTopic)
+    const intentTerms = buildIntentTerms(source, analysis)
+    return `site:${trustedHostname} ${specialistTerms} ${intentTerms}`.trim()
+  }
+
   const baseTerms = analysis?.queryTerms?.length ? analysis.queryTerms.join(' ') : query
   const intentTerms = buildIntentTerms(source, analysis)
   return `site:${source.domain} ${baseTerms} ${intentTerms}`.trim()
+}
+
+function getTrustedSourceHostname(source: Pick<SourceRegistryEntry, 'url'>) {
+  try {
+    const registeredUrl = new URL(source.url)
+    if (registeredUrl.protocol !== 'https:') return null
+    return registeredUrl.hostname.toLowerCase().replace(/^www\./, '') || null
+  } catch {
+    return null
+  }
+}
+
+function buildSpecialistQueryTerms(
+  source: SourceRegistryEntry,
+  rawQuery: string,
+  specialistTopic: string
+) {
+  const registeredTopic =
+    source.topics.find(topic => sameTopic(topic, specialistTopic)) || specialistTopic
+  const registeredEnglishName = [...source.topicAliases]
+    .filter(alias => /^[\x00-\x7f]+$/.test(alias) && alias.trim().includes(' '))
+    .sort((left, right) => {
+      const leftHasHyphen = left.includes('-') ? 1 : 0
+      const rightHasHyphen = right.includes('-') ? 1 : 0
+      return leftHasHyphen - rightHasHyphen || right.length - left.length
+    })[0]
+  const exactPathTerms = getExactPathTerms(source)
+
+  return [...new Set([rawQuery, registeredTopic, registeredEnglishName, ...exactPathTerms])]
+    .filter(Boolean)
+    .join(' ')
+}
+
+function getExactPathTerms(source: SourceRegistryEntry) {
+  if (source.pathMatch !== 'exact') return []
+
+  try {
+    const registeredUrl = new URL(source.url)
+    const terms = [registeredUrl.pathname]
+    const normalizedHost = registeredUrl.hostname.toLowerCase().replace(/^www\./, '')
+    const identifier = registeredUrl.pathname.split('/').filter(Boolean).at(-1) || ''
+    if (
+      normalizedHost === 'orpha.net' &&
+      source.sourceTypes.includes('disease_reference') &&
+      /^\d+$/.test(identifier)
+    ) {
+      terms.unshift(`ORPHA:${identifier}`)
+    }
+    return terms
+  } catch {
+    return []
+  }
 }
 
 function buildIntentTerms(source: SourceRegistryEntry, analysis?: SearchQueryAnalysis) {

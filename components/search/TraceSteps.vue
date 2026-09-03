@@ -2,9 +2,7 @@
   <section class="trace-steps">
     <div class="trace-steps__header">
       <h2 class="trace-steps__title">检索进行中</h2>
-      <p class="trace-steps__subtitle">
-        正在依次执行知识库检索、权威来源搜索、互联网补充搜索和大模型聚合整理。
-      </p>
+      <p class="trace-steps__subtitle">正在依次执行来源检索和大模型聚合整理。</p>
     </div>
 
     <TransitionGroup

@@ -9,7 +9,7 @@ export default defineConfig({
 
     // 测试文件匹配模式
     include: ['**/*.{test,spec}.{js,ts}'],
-    exclude: ['**/node_modules/**', '**/.nuxt/**', '**/.output/**'],
+    exclude: ['**/node_modules/**', '**/.nuxt/**', '**/.output/**', '**/.superpowers/**'],
 
     // 全局测试设置
     globals: true,

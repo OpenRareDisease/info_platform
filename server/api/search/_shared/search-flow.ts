@@ -2,10 +2,12 @@ import type {
   SearchMessageStatus,
   SearchQueryAnalysis,
   SearchResponse,
+  SearchSource,
   SearchTraceEntry,
 } from '~/types/search'
 import { normalizeSearchQuery } from './query-normalization'
 import { searchInternetSupplementSources, searchWhitelistedSources } from './live-search'
+import { detectSpecialistTopic, findTrustedAuthoritySource } from './authority-policy'
 import type { SearchRepositories } from './repositories'
 import type { SourceRegistryEntry } from '~/types/search'
 import type { RetrievedEvidenceItem } from './retrieval'
@@ -21,6 +23,7 @@ interface SearchFlowDeps {
     messageStatus: SearchMessageStatus
   }>
   onTrace?: (trace: SearchTraceEntry[]) => Promise<void> | void
+  onSources?: (sources: SearchSource[]) => Promise<void> | void
 }
 
 export async function runSearchFlow({
@@ -31,6 +34,7 @@ export async function runSearchFlow({
   detectSafetyRisk,
   generateAnswer,
   onTrace,
+  onSources,
 }: SearchFlowDeps): Promise<SearchResponse> {
   const safety = await detectSafetyRisk(query)
   if (safety.risky) {
@@ -47,51 +51,98 @@ export async function runSearchFlow({
   const analysis = await analyzeQuery(query)
   const searchTrace: SearchTraceEntry[] = []
   const knowledgeQuery = normalized.effectiveQuery || query
+  const internalKnowledgeEnabled = process.env.ENABLE_INTERNAL_KNOWLEDGE_BASE === 'true'
   const [notesResult, cacheResult, knowledgeResult] = await Promise.allSettled([
     repositories.searchNotes(normalized.localQuery),
     repositories.searchCache(normalized.localQuery),
-    repositories.searchKnowledgeBase(knowledgeQuery, analysis),
+    internalKnowledgeEnabled
+      ? repositories.searchKnowledgeBase(knowledgeQuery, analysis)
+      : Promise.resolve([]),
   ])
 
   const notes = notesResult.status === 'fulfilled' ? notesResult.value : []
   const cache = cacheResult.status === 'fulfilled' ? cacheResult.value : []
   const knowledge = knowledgeResult.status === 'fulfilled' ? knowledgeResult.value : []
+  const specialistQuery = detectSpecialistTopic(query) !== null
   const localEvidence: RetrievedEvidenceItem[] = [
     ...knowledge,
-    ...cache.map(entry => ({
-      sourceType: entry.sourceType,
-      sourceTier: 'authority' as const,
-      sourceLabel: entry.sourceDomain,
-      sourceUrl: entry.sourceUrl,
-      sourceDomain: entry.sourceDomain,
-      snippet: entry.snippet,
-      publishedAt: entry.publishedAt,
-      title: entry.title,
-      content: entry.content,
-    })),
-    ...notes.map(note => ({
-      sourceType: 'reference' as const,
-      sourceTier: 'authority' as const,
-      sourceLabel: note.source,
-      sourceUrl: note.source,
-      sourceDomain: extractDomain(note.source),
-      snippet: note.content.slice(0, 240),
-      publishedAt: note.publishedAt,
-      title: note.title,
-      content: note.content,
-    })),
+    ...cache.map(entry => {
+      const trustedSource = specialistQuery
+        ? findTrustedAuthoritySource({
+            rawQuery: query,
+            result: {
+              url: entry.sourceUrl,
+              title: entry.title,
+              summary: [entry.snippet, entry.content].filter(Boolean).join('\n'),
+            },
+            sources: registry,
+            requiredSourceTypes: analysis.preferredSourceTypes,
+          })
+        : null
+
+      return {
+        sourceType: trustedSource?.sourceType || entry.sourceType,
+        sourceTier: specialistQuery
+          ? trustedSource
+            ? ('authority' as const)
+            : ('internet_supplement' as const)
+          : ('authority' as const),
+        sourceLabel: trustedSource?.name || entry.sourceDomain,
+        sourceUrl: entry.sourceUrl,
+        sourceDomain: trustedSource ? getTrustedSourceDomain(trustedSource) : entry.sourceDomain,
+        snippet: entry.snippet,
+        publishedAt: entry.publishedAt,
+        title: entry.title,
+        content: entry.content,
+      }
+    }),
+    ...notes.map(note => {
+      const noteSource = normalizeSource(note.source)
+      const trustedSource = specialistQuery
+        ? findTrustedAuthoritySource({
+            rawQuery: query,
+            result: {
+              url: noteSource,
+              title: note.title,
+              summary: note.content,
+            },
+            sources: registry,
+            requiredSourceTypes: analysis.preferredSourceTypes,
+          })
+        : null
+
+      return {
+        sourceType: trustedSource?.sourceType || ('reference' as const),
+        sourceTier: specialistQuery
+          ? trustedSource
+            ? ('authority' as const)
+            : ('internet_supplement' as const)
+          : ('authority' as const),
+        sourceLabel: trustedSource?.name || noteSource,
+        sourceUrl: noteSource,
+        sourceDomain: trustedSource
+          ? getTrustedSourceDomain(trustedSource)
+          : extractDomain(noteSource),
+        snippet: note.content.slice(0, 240),
+        publishedAt: note.publishedAt,
+        title: note.title,
+        content: note.content,
+      }
+    }),
   ]
 
-  searchTrace.push(
-    buildLocalTrace(
-      notesResult,
-      cacheResult,
-      knowledgeResult,
-      notes.length,
-      cache.length,
-      knowledge.length
+  if (internalKnowledgeEnabled) {
+    searchTrace.push(
+      buildLocalTrace(
+        notesResult,
+        cacheResult,
+        knowledgeResult,
+        notes.length,
+        cache.length,
+        knowledge.length
+      )
     )
-  )
+  }
   await onTrace?.([...searchTrace])
 
   let authorityEvidence: RetrievedEvidenceItem[] = []
@@ -125,7 +176,8 @@ export async function runSearchFlow({
   try {
     supplementEvidence = await searchInternetSupplementSources(
       normalized.effectiveQuery || query,
-      registry
+      registry,
+      analysis
     )
     searchTrace.push({
       key: 'internet-search',
@@ -146,7 +198,15 @@ export async function runSearchFlow({
   }
   await onTrace?.([...searchTrace])
 
-  const evidence = [...localEvidence, ...authorityEvidence, ...supplementEvidence]
+  const evidence = [
+    ...sortEvidenceByPublishedAt(authorityEvidence),
+    ...sortEvidenceByPublishedAt(localEvidence.filter(item => !isInternalKnowledgeEvidence(item))),
+    ...sortEvidenceByPublishedAt(localEvidence.filter(isInternalKnowledgeEvidence)),
+    ...sortEvidenceByPublishedAt(supplementEvidence),
+  ]
+  const sources = mapEvidenceToSources(evidence)
+  await onSources?.(sources)
+
   const answer = await generateAnswer({
     query,
     evidence,
@@ -156,19 +216,47 @@ export async function runSearchFlow({
     query,
     answer: answer.content,
     messageStatus: answer.messageStatus,
-    sources: evidence.map((item, index) => ({
-      title: item.title,
-      sourceType: item.sourceType,
-      sourceTier: item.sourceTier || 'authority',
-      sourceLabel: item.sourceLabel,
-      sourceUrl: item.sourceUrl,
-      sourceDomain: item.sourceDomain,
-      snippet: item.snippet,
-      publishedAt: item.publishedAt,
-      rank: index + 1,
-    })),
+    sources,
     searchTrace,
   }
+}
+
+function mapEvidenceToSources(evidence: RetrievedEvidenceItem[]): SearchSource[] {
+  return evidence.map((item, index) => ({
+    title: item.title,
+    sourceType: item.sourceType,
+    sourceTier: item.sourceTier || 'authority',
+    sourceLabel: item.sourceLabel,
+    sourceUrl: item.sourceUrl,
+    sourceDomain: item.sourceDomain,
+    snippet: item.snippet,
+    publishedAt: item.publishedAt,
+    rank: index + 1,
+  }))
+}
+
+function isInternalKnowledgeEvidence(item: RetrievedEvidenceItem) {
+  return item.sourceLabel.startsWith('站内内容 ·')
+}
+
+function sortEvidenceByPublishedAt(items: RetrievedEvidenceItem[]) {
+  return items
+    .map((item, index) => ({ item, index, publishedAt: parsePublishedAt(item.publishedAt) }))
+    .sort((left, right) => {
+      if (left.publishedAt !== null && right.publishedAt !== null) {
+        return right.publishedAt - left.publishedAt || left.index - right.index
+      }
+      if (left.publishedAt !== null) return -1
+      if (right.publishedAt !== null) return 1
+      return left.index - right.index
+    })
+    .map(({ item }) => item)
+}
+
+function parsePublishedAt(value: string | null) {
+  if (!value) return null
+  const timestamp = Date.parse(value)
+  return Number.isNaN(timestamp) ? null : timestamp
 }
 
 function buildLocalTrace(
@@ -211,6 +299,20 @@ function extractDomain(value: string) {
     return new URL(value).hostname
   } catch {
     return value
+  }
+}
+
+function normalizeSource(value: unknown) {
+  return typeof value === 'string' ? value : ''
+}
+
+function getTrustedSourceDomain(source: SourceRegistryEntry) {
+  try {
+    const url = new URL(source.url)
+    if (url.protocol !== 'https:') return ''
+    return url.hostname.toLowerCase().replace(/^www\./, '')
+  } catch {
+    return ''
   }
 }
 

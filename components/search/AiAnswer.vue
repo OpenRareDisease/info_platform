@@ -1,11 +1,11 @@
 <template>
-  <div v-if="answer" class="ai-answer">
+  <div v-if="answer || streaming" class="ai-answer">
     <button v-if="!showAnswer" class="ai-answer__trigger" @click="showAnswer = true">
       AI一键解读
     </button>
 
     <div v-if="showAnswer" class="ai-answer__body">
-      <h3 class="ai-answer__heading">AI 解读</h3>
+      <h3 class="ai-answer__heading">{{ streaming ? 'AI 正在整理ing' : 'AI 解读' }}</h3>
       <p v-for="(paragraph, idx) in paragraphs" :key="idx" class="ai-answer__text">
         {{ paragraph }}
       </p>
@@ -19,9 +19,11 @@ import { ref, computed } from 'vue'
 
 const props = defineProps<{
   answer: string
+  streaming?: boolean
+  initiallyExpanded?: boolean
 }>()
 
-const showAnswer = ref(false)
+const showAnswer = ref(props.initiallyExpanded || false)
 
 const paragraphs = computed(() =>
   props.answer

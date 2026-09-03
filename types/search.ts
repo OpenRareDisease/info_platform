@@ -10,6 +10,7 @@ export const SEARCH_SOURCE_TYPES = [
 ] as const
 export const AUTHORITY_SOURCE_TYPES = [
   'disease_reference',
+  'clinical_guideline',
   'treatment_update',
   'clinical_trial',
   'drug_approval',
@@ -19,6 +20,7 @@ export const AUTHORITY_SOURCE_TYPES = [
 ] as const
 export const SEARCH_QUERY_INTENTS = [
   'disease_overview',
+  'clinical_guidance',
   'treatment_update',
   'clinical_trial',
   'drug_approval',
@@ -103,6 +105,10 @@ export interface SourceRegistryEntry {
   priority: number
   enabled: boolean
   notes: string | null
+  topics: string[]
+  topicAliases: string[]
+  authorityEligible: boolean
+  pathMatch: 'exact' | 'prefix'
 }
 
 export interface SearchQueryAnalysis {

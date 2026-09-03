@@ -1,4 +1,4 @@
-分类	网站名称	网址	主要功能	覆盖范围	语言	备注
+分类	网站名称	网址	主要功能	覆盖范围	语言	备注	专病主题	专病别名	权威准入	路径规则
 药物批准信息查询	美国 FDA 孤儿药数据库	https://www.accessdata.fda.gov/scripts/opdlisting/oopd	可按产品名、赞助商、指定日期等检索	美国	英语/多语言辅助	支持下载 Excel
 药物批准信息查询	NMPA 审评报告	https://www.nmpa.gov.cn	中国药品审评审批信息，含罕见病药通道	中国	中文	2020 报告显示临床急需境外已上市新药 100% 按时完成审结
 药物批准信息查询	EMA 孤儿药与 PRIME	https://www.ema.europa.eu/en/our-work/medicines-development/rare-diseases	欧盟孤儿药指定、PRIME 评审和批准信息	欧盟	英语	2023 年授予 17 个孤儿药指定，提供加速审批通道
@@ -44,7 +44,23 @@
 最新资讯	Global Genes	https://globalgenes.org	新闻、政策、患者故事、年会资讯	全球	英语	可订阅 RSS/邮件
 最新资讯	Rare Disease Day 官网	https://www.rarediseaseday.org	每年 2 月罕见病日最新活动与媒体包	全球	多语言	含中文版物料下载
 最新资讯	RDI 罕见病国际	https://www.rarediseasesinternational.org	全球政策简报、联合国诉求进展	全球	英语	可订阅月度简报
-最新资讯	FSHD Society	https://www.fshdsociety.org	FSHD 专病组织新闻、研究资助、临床项目更新	全球	英语	对 FSHD 等专病进展检索更高相关
+最新资讯	FSHD Society	https://www.fshdsociety.org	FSHD 专病组织新闻、研究资助、临床项目更新	全球	英语	对 FSHD 等专病进展检索更高相关	FSHD		true	prefix
+患者组织/社群与最新资讯	Systemic JIA Foundation	https://www.systemicjia.org/	sJIA 专病研究动态、患者教育和患者支持	全球	英语	官方专病组织，提供 research updates	sJIA		true	prefix
+临床指南	American College of Rheumatology JIA Guideline	https://rheumatology.org/juvenile-idiopathic-arthritis-guideline	美国风湿病学会 JIA 指南入口	美国	英语	仅作为临床指南证据	sJIA		true	exact
+数据库/信息库	Orphanet ORPHA:85414	https://www.orpha.net/en/disease/detail/85414	sJIA 精确疾病页，提供定义、编码、流行病学和临床概览	全球	多语言	仅作为疾病定义、编码、流行病学和临床概览证据	sJIA		true	exact
+临床指南	WFH 血友病临床管理指南	https://guidelines.wfh.org/guidelines/	血友病 A/B 的循证临床管理指南	全球	英语	仅作为临床指南证据	Hemophilia		true	prefix
+患者组织/社群与最新资讯	WFH 血友病治疗与照护	https://wfh.org/treatment-and-care/	血友病 A/B 的治疗、照护和疾病教育更新	全球	英语	国际专病组织维护的治疗与照护入口	Hemophilia		true	prefix
+患者组织/社群与最新资讯	World Federation of Hemophilia	https://wfh.org/	血友病 A/B 的全球照护、研究和患者教育动态	全球	英语	国际血友病专病组织的官方动态入口	Hemophilia		true	prefix
+患者组织/社群与最新资讯	National Bleeding Disorders Foundation	https://www.bleeding.org/	血友病 A/B 的专病研究、患者教育与社区动态	美国	英语	美国国家出血性疾病基金会的官方动态入口	Hemophilia		true	prefix
+临床指南	PPMD 杜氏肌营养不良照护指南	https://www.parentprojectmd.org/care/care-guidelines/	杜氏肌营养不良的照护指南与认证照护中心信息	全球	英语	仅作为临床指南证据	DMD		true	prefix
+患者组织/社群与最新资讯	MDA 杜氏肌营养不良	https://www.mda.org/disease/duchenne-muscular-dystrophy	杜氏肌营养不良的患者教育、支持和研究资讯	美国	英语	专病患者组织页面	DMD		true	exact
+患者组织/社群与最新资讯	CureDuchenne	https://cureduchenne.org/	杜氏肌营养不良的临床研究、基因治疗和社区更新	全球	英语	DMD 专病组织的官方研究更新入口	DMD		true	prefix
+临床指南	垂体学会肢端肥大症管理指南	https://pituitarysociety.org/guidelines/	肢端肥大症管理指南和专业更新	全球	英语	仅作为临床指南证据	Acromegaly		true	prefix
+患者组织/社群与最新资讯	Acromegaly Community	https://acromegalycommunity.org/	肢端肥大症患者教育、支持和疾病资讯	全球	英语	专病患者组织	Acromegaly		true	prefix
+患者组织/社群与最新资讯	Pituitary Network Association	https://pituitary.org/	肢端肥大症的患者教育、研究和疾病动态	全球	英语	国际垂体疾病患者组织的官方动态入口	Acromegaly		true	prefix
+学术期刊与最新资讯	Endocrine Reviews Acromegaly Update	https://www.endocrine.org/journals/endocrine-reviews/medical-treatment-of-acromegaly	肢端肥大症治疗进展与新疗法研究综述	全球	英语	内分泌学会官方期刊页面，仅作为研究和治疗进展证据	Acromegaly		true	exact
+临床指南	AASM 发作性睡病治疗指南	https://aasm.org/wp-content/uploads/2022/03/Treatment_Central_Disorders_Hypersomnolence_Guideline_at_a_Glance.pdf	发作性睡病及中枢性嗜睡障碍的治疗建议	全球	英语	仅作为临床指南证据	Narcolepsy		true	exact
+患者组织/社群与最新资讯	Project Sleep	https://project-sleep.com/	发作性睡病患者教育、倡导和研究资讯	全球	英语	专病患者组织	Narcolepsy		true	prefix
 最新资讯	新华社罕见病专题	http://www.xinhuanet.com/health/rd	国内政策解读、患者故事	中国	中文	权威信源，可转公众号
 最新资讯	CORD 微信公众号	微信搜索“罕见病发展中心”	每日推送国内资讯、药物上市、医保动态	中国	中文	可后台留言求助
 最新资讯	STAT News 罕见病频道	https://www.statnews.com/topic/rare-diseases	全球政策与研发新闻	全球	英语	免费浏览

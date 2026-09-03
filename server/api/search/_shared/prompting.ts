@@ -3,35 +3,45 @@ import { normalizeSearchQuery } from './query-normalization'
 
 export function buildSearchPrompt(input: { query: string; evidence: RetrievedEvidenceItem[] }) {
   const normalized = normalizeSearchQuery(input.query)
-  const knowledgeBaseEvidence = input.evidence.filter(
+  const primaryEvidence = input.evidence
+    .filter(item => item.sourceTier !== 'internet_supplement')
+    .slice(0, 4)
+  const internetSupplementEvidence = input.evidence
+    .filter(item => item.sourceTier === 'internet_supplement')
+    .slice(0, 2)
+  const knowledgeBaseEvidence = primaryEvidence.filter(
     item => item.sourceTier !== 'internet_supplement' && item.sourceLabel.includes('站内内容')
   )
-  const authorityEvidence = input.evidence.filter(
+  const authorityEvidence = primaryEvidence.filter(
     item => item.sourceTier !== 'internet_supplement' && !item.sourceLabel.includes('站内内容')
   )
-  const internetSupplementEvidence = input.evidence.filter(
-    item => item.sourceTier === 'internet_supplement'
-  )
+
+  const formatEvidence = (
+    item: RetrievedEvidenceItem,
+    tierLabel: '站内内容' | '权威来源' | '互联网补充',
+    limit: number
+  ) => {
+    const content = item.content.trim()
+    const snippet = item.snippet.trim()
+    let excerpt = content || snippet
+
+    if (content && snippet && content !== snippet && !content.includes(snippet)) {
+      const snippetBudget = Math.floor(limit / 2)
+      const contentBudget = limit - snippetBudget
+      excerpt = `命中摘要: ${snippet.slice(0, snippetBudget)}\n页面内容: ${content.slice(0, contentBudget)}`
+    }
+
+    return `[${tierLabel}｜${item.sourceLabel}] ${item.title}\nURL: ${item.sourceUrl}\n证据片段: ${excerpt.slice(0, limit)}`
+  }
 
   const knowledgeBase = knowledgeBaseEvidence
-    .map(
-      item =>
-        `[站内内容｜${item.sourceLabel}] ${item.title}\nURL: ${item.sourceUrl}\n摘要: ${item.snippet}\n内容: ${item.content.slice(0, 400)}`
-    )
+    .map(item => formatEvidence(item, '站内内容', 360))
     .join('\n\n')
 
-  const evidence = authorityEvidence
-    .map(
-      item =>
-        `[权威来源｜${item.sourceLabel}] ${item.title}\nURL: ${item.sourceUrl}\n摘要: ${item.snippet}\n内容: ${item.content.slice(0, 400)}`
-    )
-    .join('\n\n')
+  const evidence = authorityEvidence.map(item => formatEvidence(item, '权威来源', 360)).join('\n\n')
 
   const internetSupplement = internetSupplementEvidence
-    .map(
-      item =>
-        `[互联网补充｜${item.sourceLabel}] ${item.title}\nURL: ${item.sourceUrl}\n摘要: ${item.snippet}\n内容: ${item.content.slice(0, 320)}`
-    )
+    .map(item => formatEvidence(item, '互联网补充', 280))
     .join('\n\n')
 
   return `
@@ -46,6 +56,8 @@ export function buildSearchPrompt(input: { query: string; evidence: RetrievedEvi
 - 优先使用权威来源得出结论
 - 如果用了互联网补充信息，要明确说这是补充参考
 - 如果没有证据，不要编造具体药名、技术名或研究项目名
+- 指南落地页或仅说明指南存在的摘要，只能证明该指南的存在或官方属性；除非给定证据中包含具体推荐文本，不得仅凭这类证据推导具体药物、剂量或推荐强度等治疗结论
+- 总字数控制在 500 到 800 个中文字符左右，避免重复证据和冗长背景
 - 输出请严格按以下结构组织：
   1. 直接结论
   2. 当前已知信息

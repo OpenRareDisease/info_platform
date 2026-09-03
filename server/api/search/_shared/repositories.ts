@@ -1,4 +1,9 @@
-import type { SearchCacheEntry, SearchQueryAnalysis, SourceRegistryEntry } from '~/types/search'
+import {
+  AUTHORITY_SOURCE_TYPES,
+  type SearchCacheEntry,
+  type SearchQueryAnalysis,
+  type SourceRegistryEntry,
+} from '~/types/search'
 import type { Database } from '~/types/database.types'
 import type { RetrievedEvidenceItem } from './retrieval'
 import { generateKnowledgeEmbedding } from './embeddings'
@@ -30,7 +35,7 @@ export interface SearchRepositories {
     query: string,
     analysis?: SearchQueryAnalysis
   ): Promise<RetrievedEvidenceItem[]>
-  listEnabledSources(): Promise<SourceRegistryEntry[]>
+  listRegisteredSources(): Promise<SourceRegistryEntry[]>
 }
 
 export function createSearchRepositories(supabase: DbClient): SearchRepositories {
@@ -172,27 +177,21 @@ export function createSearchRepositories(supabase: DbClient): SearchRepositories
         .slice(0, 2)
     },
 
-    async listEnabledSources() {
+    async listRegisteredSources() {
       const { data, error } = await (
         supabase.from('source_registry') as {
           select: (value: string) => {
-            eq: (
+            order: (
               column: string,
-              value: boolean
-            ) => {
-              order: (
-                column: string,
-                options: { ascending: boolean }
-              ) => Promise<{
-                data: unknown
-                error: { code?: string; message?: string } | null
-              }>
-            }
+              options: { ascending: boolean }
+            ) => Promise<{
+              data: unknown
+              error: { code?: string; message?: string } | null
+            }>
           }
         }
       )
         .select('*')
-        .eq('enabled', true)
         .order('priority', { ascending: true })
 
       if (error) {
@@ -214,6 +213,10 @@ export function createSearchRepositories(supabase: DbClient): SearchRepositories
         priority: typeof row.priority === 'number' ? row.priority : Number(row.priority || 0),
         enabled: Boolean(row.enabled),
         notes: asNullableString(row.notes),
+        topics: asStringList(row.topics),
+        topicAliases: asStringList(row.topic_aliases),
+        authorityEligible: row.authority_eligible === true,
+        pathMatch: row.path_match === 'exact' ? 'exact' : 'prefix',
       }))
     },
   }
@@ -233,6 +236,12 @@ function asString(value: unknown) {
 
 function asNullableString(value: unknown) {
   return typeof value === 'string' ? value : null
+}
+
+function asStringList(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : []
 }
 
 function asNullableNumber(value: unknown) {
@@ -330,9 +339,11 @@ function asAuthoritySourceTypes(
   sourceType: unknown
 ): SourceRegistryEntry['sourceTypes'] {
   if (Array.isArray(sourceTypes)) {
-    return sourceTypes.filter(
-      item => typeof item === 'string'
-    ) as SourceRegistryEntry['sourceTypes']
+    const parsed = sourceTypes.filter(
+      (item): item is SourceRegistryEntry['sourceTypes'][number] =>
+        typeof item === 'string' && (AUTHORITY_SOURCE_TYPES as readonly string[]).includes(item)
+    )
+    if (parsed.length > 0) return parsed
   }
 
   const normalized = typeof sourceType === 'string' ? sourceType : 'reference'
